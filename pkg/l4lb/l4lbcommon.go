@@ -39,7 +39,13 @@ import (
 // computeNewAnnotationsIfNeeded checks if new annotations should be added to service.
 // If needed creates new service meta object.
 // This function is used by External and Internal L4 LB controllers.
-func computeNewAnnotationsIfNeeded(svc *v1.Service, newAnnotations map[string]string, keysToRemove []string) *metav1.ObjectMeta {
+func computeNewAnnotationsIfNeeded(svc *v1.Service, newAnnotations map[string]string, enableDualStack bool) *metav1.ObjectMeta {
+	var keysToRemove []string
+	if enableDualStack {
+		keysToRemove = loadbalancers.L4DualStackResourceAnnotationKeys
+	} else {
+		keysToRemove = loadbalancers.L4ResourceAnnotationKeys
+	}
 	newObjectMeta := svc.ObjectMeta.DeepCopy()
 	newObjectMeta.Annotations = mergeAnnotations(newObjectMeta.Annotations, newAnnotations, keysToRemove)
 	return newObjectMeta
@@ -71,39 +77,35 @@ func deleteAnnotation(ctx *context.ControllerContext, svc *v1.Service, annotatio
 	}
 	svcLogger.V(3).Info("Removing annotation from service", "annotationKey", annotationKey)
 	delete(newObjectMeta.Annotations, annotationKey)
-	return patch.PatchServiceObjectMetadata(ctx.KubeClient.CoreV1(), svc, *newObjectMeta)
+	return patch.PatchServiceObjectMetadata(ctx.KubeClient.CoreV1(), svc, newObjectMeta)
 }
 
 // updateServiceStatus this faction checks if LoadBalancer status changed and patch service if needed.
 func updateServiceInformation(ctx *context.ControllerContext, enableDualStack bool, svc *v1.Service, newStatus *v1.LoadBalancerStatus, newL4LBAnnotations map[string]string, svcLogger klog.Logger) error {
-	var keysToRemove []string
-	if enableDualStack {
-		emitEnsuredDualStackEvent(ctx, svc)
-		keysToRemove = loadbalancers.L4DualStackResourceAnnotationKeys
-	} else {
-		keysToRemove = loadbalancers.L4ResourceAnnotationKeys
-	}
-	svcLogger.V(2).Info("Selected keysToRemove", "keysToRemove", keysToRemove)
-
-	newObjectMeta := computeNewAnnotationsIfNeeded(svc, newL4LBAnnotations, keysToRemove)
+	emitIpFamiliesStackEvent(ctx, svc)
+	newObjectMeta := computeNewAnnotationsIfNeeded(svc, newL4LBAnnotations, enableDualStack)
 
 	svcLogger.V(2).Info("Updating service information", "newStatus", fmt.Sprintf("%+v", newStatus), "newObjectMeta", newObjectMeta)
 	if helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus) && reflect.DeepEqual(svc.ObjectMeta.Annotations, newObjectMeta.Annotations) {
 		svcLogger.V(2).Info("New and old service Status and Annotations are equal, skipping patch")
 		return nil
 	}
-
-	return patch.PatchServiceLoadBalancerInformation(ctx.KubeClient.CoreV1(), svc, *newStatus, *newObjectMeta)
-
+	return patch.PatchServiceLoadBalancerInformation(ctx.KubeClient.CoreV1(), svc, newStatus, newObjectMeta)
 }
 
-func emitEnsuredDualStackEvent(ctx *context.ControllerContext, service *v1.Service) {
+func emitIpFamiliesStackEvent(ctx *context.ControllerContext, service *v1.Service) {
 	var ipFamilies []string
 	for _, ipFamily := range service.Spec.IPFamilies {
 		ipFamilies = append(ipFamilies, string(ipFamily))
 	}
 	ctx.Recorder(service.Namespace).Eventf(service, v1.EventTypeNormal, "SyncLoadBalancerSuccessful",
-		"Successfully ensured %v load balancer resources", strings.Join(ipFamilies, " "))
+		"Successfully ensured %v load balancer resources", func() string {
+			if len(ipFamilies) == 0 {
+				return "L4"
+			}
+			return strings.Join(ipFamilies, " ")
+		}())
+
 }
 
 // isHealthCheckDeleted checks if given health check exists in GCE

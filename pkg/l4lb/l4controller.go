@@ -253,7 +253,7 @@ func (l4c *L4Controller) processServiceCreateOrUpdate(service *v1.Service, svcLo
 
 	// Ensure v2 finalizer
 	if err := common.EnsureServiceFinalizer(service, common.ILBFinalizerV2, l4c.ctx.KubeClient, svcLogger); err != nil {
-		return &loadbalancers.L4ILBSyncResult{Error: fmt.Errorf("Failed to attach finalizer to service %s/%s, err %w", service.Namespace, service.Name, err)}
+		return &loadbalancers.L4ILBSyncResult{Error: fmt.Errorf("failed to attach finalizer to service %s/%s, err %w", service.Namespace, service.Name, err)}
 	}
 	nodes, err := l4c.zoneGetter.ListNodes(zonegetter.CandidateNodesFilter, svcLogger)
 	if err != nil {
@@ -299,7 +299,7 @@ func (l4c *L4Controller) processServiceCreateOrUpdate(service *v1.Service, svcLo
 	err = updateServiceInformation(l4c.ctx, l4c.enableDualStack, service, syncResult.Status, syncResult.Annotations, svcLogger)
 	if err != nil {
 		l4c.ctx.Recorder(service.Namespace).Eventf(service, v1.EventTypeWarning, "SyncLoadBalancerFailed",
-			"Error updating load balancer status: %v", err)
+			"Error updating Service status and GCP resource annotations: %v", err)
 		syncResult.Error = err
 		return syncResult
 	}
@@ -333,8 +333,8 @@ func (l4c *L4Controller) processServiceDeletion(key string, svc *v1.Service, svc
 	// Following this order avoids a race condition when a service is changed from LoadBalancer type Internal to External.
 	if err := updateServiceInformation(l4c.ctx, l4c.enableDualStack, svc, &v1.LoadBalancerStatus{}, nil, svcLogger); err != nil {
 		l4c.ctx.Recorder(svc.Namespace).Eventf(svc, v1.EventTypeWarning, "DeleteLoadBalancer",
-			"Error resetting load balancer status to empty: %v", err)
-		result.Error = fmt.Errorf("failed to reset ILB status, err: %w", err)
+			"Error cleaning Service status and GCP resource annotations: %v", err)
+		result.Error = fmt.Errorf("failed to clean ILB statu and GCP resource annotations, err: %w", err)
 		return result
 	}
 
