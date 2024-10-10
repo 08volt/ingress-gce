@@ -72,6 +72,7 @@ const (
 	usersIP              = "35.10.211.60"
 	testServiceNamespace = "default"
 	hcNodePort           = int32(10111)
+	trafficDistribution  = "PreferClose"
 	userAddrName         = "UserStaticAddress"
 
 	shortSessionAffinityIdleTimeout = int32(20)     // 20 sec could be used for regular Session Affinity
