@@ -43,6 +43,7 @@ import (
 
 const (
 	subnetInternalIPv6AccessType          = "INTERNAL"
+	trafficDistribuitionZonalAffinity     = "PreferClose"
 	WeightedLBPodsPerNodeAllowlistMessage = "Weighted Load Balancing for L4 " +
 		"Internal Passthrough Load Balancers requires project allowlisting. If " +
 		"you need access to this feature please contact Google Cloud support team"
@@ -71,6 +72,7 @@ type L4 struct {
 	networkResolver                  network.Resolver
 	enableWeightedLB                 bool
 	disableNodesFirewallProvisioning bool
+	enableZonalAffinity              bool
 	svcLogger                        klog.Logger
 }
 
@@ -107,6 +109,7 @@ type L4ILBParams struct {
 	DualStackEnabled                 bool
 	NetworkResolver                  network.Resolver
 	EnableWeightedLB                 bool
+	EnableZonalAffinity              bool
 	DisableNodesFirewallProvisioning bool
 }
 
@@ -127,6 +130,7 @@ func NewL4Handler(params *L4ILBParams, logger klog.Logger) *L4 {
 		networkResolver:                  params.NetworkResolver,
 		enableWeightedLB:                 params.EnableWeightedLB,
 		disableNodesFirewallProvisioning: params.DisableNodesFirewallProvisioning,
+		enableZonalAffinity:              params.EnableZonalAffinity,
 		svcLogger:                        logger,
 	}
 	l4.NamespacedName = types.NamespacedName{Name: params.Service.Name, Namespace: params.Service.Namespace}
@@ -485,9 +489,18 @@ func (l4 *L4) EnsureInternalLoadBalancer(nodeNames []string, svc *corev1.Service
 
 	localityLbPolicy := l4.determineBackendServiceLocalityPolicy()
 
+	svcEnableZonalAffinity := svc.Spec.TrafficDistribution != nil && *svc.Spec.TrafficDistribution == trafficDistribuitionZonalAffinity
+	finalEnableZonalAffinity := l4.enableZonalAffinity && svcEnableZonalAffinity
+
+	version := meta.VersionGA
+	if finalEnableZonalAffinity {
+		version = meta.VersionAlpha
+	}
+
 	// ensure backend service
 	backendParams := backends.L4BackendServiceParams{
 		Name:                     bsName,
+		Version:                  version,
 		HealthCheckLink:          hcLink,
 		Protocol:                 string(protocol),
 		SessionAffinity:          string(l4.Service.Spec.SessionAffinity),
@@ -495,6 +508,7 @@ func (l4 *L4) EnsureInternalLoadBalancer(nodeNames []string, svc *corev1.Service
 		NamespacedName:           l4.NamespacedName,
 		NetworkInfo:              &l4.network,
 		ConnectionTrackingPolicy: noConnectionTrackingPolicy,
+		EnableZonalAffinity:      finalEnableZonalAffinity,
 		LocalityLbPolicy:         localityLbPolicy,
 	}
 	bs, _, err := l4.backendPool.EnsureL4BackendService(backendParams, l4.svcLogger)
