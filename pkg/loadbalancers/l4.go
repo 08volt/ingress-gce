@@ -597,8 +597,9 @@ func (l4 *L4) EnsureInternalLoadBalancer(nodeNames []string, svc *corev1.Service
 }
 
 func (l4 *L4) requireZonalAffinity(svc *corev1.Service) bool {
-	svcEnableZonalAffinity := svc.Spec.TrafficDistribution != nil && *svc.Spec.TrafficDistribution == trafficDistribuitionZonalAffinity
-	return l4.enableZonalAffinity && svcEnableZonalAffinity
+	return l4.enableZonalAffinity && // zonal affinity flag is enabled
+		svc.Spec.TrafficDistribution != nil && // traffic distribution field is set
+		*svc.Spec.TrafficDistribution == trafficDistribuitionZonalAffinity // traffic distribution field is set to zonal affinity default "PreferClose"
 }
 
 func (l4 *L4) provideHealthChecks(nodeNames []string, result *L4ILBSyncResult) string {
