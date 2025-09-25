@@ -2,6 +2,7 @@ package loadbalancers
 
 import (
 	"fmt"
+	"slices"
 	"sort"
 
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
@@ -56,10 +57,13 @@ func verifyAddressNotExists(cloud *gce.Cloud, addressName string) error {
 	return nil
 }
 
-func verifyFirewall(cloud *gce.Cloud, nodeNames []string, firewallName, expectedDescription string, expectedSourceRanges []string, expectedNetworkURL string) error {
+func verifyFirewall(cloud *gce.Cloud, nodeNames []string, firewallName, expectedDescription string, expectedSourceRanges []string, expectedNetworkURL string, expectedResourcesURLs []string) error {
 	firewall, err := cloud.GetFirewall(firewallName)
 	if err != nil {
 		return fmt.Errorf("failed to fetch firewall rule %q - err %w", firewallName, err)
+	}
+	if !slices.Contains(expectedResourcesURLs, firewall.SelfLink) {
+		return fmt.Errorf("firewall %q not in expected resources: %v", firewall.SelfLink, expectedResourcesURLs)
 	}
 	if !utils.EqualStringSets(nodeNames, firewall.TargetTags) {
 		return fmt.Errorf("expected firewall rule target tags '%v', Got '%v'", nodeNames, firewall.TargetTags)

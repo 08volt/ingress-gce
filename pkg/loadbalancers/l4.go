@@ -93,6 +93,7 @@ type L4ILBSyncResult struct {
 	SyncType           string
 	StartTime          time.Time
 	ResourceUpdates    ResourceUpdates
+	GCEResourceURLs    []string
 }
 
 func NewL4ILBSyncResult(syncType string, startTime time.Time, svc *corev1.Service, isMultinetService bool, isWeightedLBPodsPerNode bool, isLBWithZonalAffinity bool) *L4ILBSyncResult {
@@ -102,7 +103,8 @@ func NewL4ILBSyncResult(syncType string, startTime time.Time, svc *corev1.Servic
 		StartTime:   startTime,
 		SyncType:    syncType,
 		// Internal Load Balancer doesn't support strong session affinity (passing `false` all along)
-		MetricsState: metrics.InitServiceMetricsState(svc, &startTime, isMultinetService, enabledStrongSessionAffinity, isWeightedLBPodsPerNode, isLBWithZonalAffinity, metrics.L4BackendTypeNEG),
+		MetricsState:    metrics.InitServiceMetricsState(svc, &startTime, isMultinetService, enabledStrongSessionAffinity, isWeightedLBPodsPerNode, isLBWithZonalAffinity, metrics.L4BackendTypeNEG),
+		GCEResourceURLs: []string{},
 	}
 	return result
 }
@@ -589,6 +591,7 @@ func (l4 *L4) EnsureInternalLoadBalancer(nodeNames []string, svc *corev1.Service
 		return result
 	}
 	result.Annotations[annotations.BackendServiceKey] = bsName
+	result.GCEResourceURLs = append(result.GCEResourceURLs, bs.SelfLink)
 	if bs.LogConfig != nil {
 		result.MetricsState.LoggingEnabled = bs.LogConfig.Enable
 	}
@@ -643,17 +646,20 @@ func (l4 *L4) provideDualStackHealthChecks(nodeNames []string, result *L4ILBSync
 
 	if hcResult.HCFirewallRuleName != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+		result.GCEResourceURLs = append(result.GCEResourceURLs, hcResult.HCFirewallRuleLink)
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckKey)
 	}
 
 	if hcResult.HCFirewallRuleIPv6Name != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckIPv6Key] = hcResult.HCFirewallRuleIPv6Name
+		result.GCEResourceURLs = append(result.GCEResourceURLs, hcResult.HCFirewallRuleIPv6Link)
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckIPv6Key)
 	}
 
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
+	result.GCEResourceURLs = append(result.GCEResourceURLs, hcResult.HCLink)
 	return hcResult.HCLink
 }
 
@@ -662,6 +668,7 @@ func (l4 *L4) provideIPv4HealthChecks(nodeNames []string, result *L4ILBSyncResul
 	hcResult := l4.healthChecks.EnsureHealthCheckWithFirewall(l4.Service, l4.namer, sharedHC, meta.Global, utils.ILB, nodeNames, l4.network, l4.svcLogger)
 	result.ResourceUpdates.SetHealthCheck(hcResult.WasUpdated)
 	result.ResourceUpdates.SetFirewallForHealthCheck(hcResult.WasFirewallUpdated)
+
 	if hcResult.Err != nil {
 		result.GCEResourceInError = hcResult.GceResourceInError
 		result.Error = hcResult.Err
@@ -669,6 +676,14 @@ func (l4 *L4) provideIPv4HealthChecks(nodeNames []string, result *L4ILBSyncResul
 	}
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
 	result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+	result.GCEResourceURLs = append(result.GCEResourceURLs, hcResult.HCLink)
+	if hcResult.HCFirewallRuleIPv6Link != "" {
+		result.GCEResourceURLs = append(result.GCEResourceURLs, hcResult.HCFirewallRuleIPv6Link)
+	}
+	if hcResult.HCFirewallRuleLink != "" {
+		result.GCEResourceURLs = append(result.GCEResourceURLs, hcResult.HCFirewallRuleLink)
+	}
+
 	return hcResult.HCLink
 }
 
@@ -706,6 +721,7 @@ func (l4 *L4) ensureIPv4Resources(result *L4ILBSyncResult, nodeNames []string, o
 	case forwardingrules.ProtocolL3:
 		result.Annotations[annotations.L3ForwardingRuleKey] = fr.Name
 	}
+	result.GCEResourceURLs = append(result.GCEResourceURLs, fr.SelfLink)
 
 	l4.ensureIPv4NodesFirewall(nodeNames, fr.IPAddress, result)
 	if result.Error != nil {
@@ -763,7 +779,7 @@ func (l4 *L4) ensureIPv4NodesFirewall(nodeNames []string, ipAddress string, resu
 		Network:           l4.network,
 	}
 
-	fwSyncStatus, err := firewalls.EnsureL4LBFirewallForNodes(l4.Service, &nodesFWRParams, l4.cloud, l4.recorder, fwLogger)
+	fwRule, fwSyncStatus, err := firewalls.EnsureL4LBFirewallForNodes(l4.Service, &nodesFWRParams, l4.cloud, l4.recorder, fwLogger)
 	result.ResourceUpdates.SetFirewallForNodes(fwSyncStatus)
 	if err != nil {
 		result.GCEResourceInError = annotations.FirewallRuleResource
@@ -771,6 +787,7 @@ func (l4 *L4) ensureIPv4NodesFirewall(nodeNames []string, ipAddress string, resu
 		return
 	}
 	result.Annotations[annotations.FirewallRuleKey] = firewallName
+	result.GCEResourceURLs = append(result.GCEResourceURLs, fwRule.SelfLink)
 }
 
 func (l4 *L4) getServiceSubnetworkURL(options gce.ILBOptions) (string, error) {

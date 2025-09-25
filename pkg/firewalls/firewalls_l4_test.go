@@ -173,13 +173,16 @@ func TestEnsureL4FirewallRule(t *testing.T) {
 			if tc.existingRule != nil {
 				fakeGCE.CreateFirewall(tc.existingRule)
 			}
-			updateDone, err := EnsureL4FirewallRule(fakeGCE, tc.nsName, tc.params, tc.shared, klog.TODO())
+			ensuredFirewall, updateDone, err := EnsureL4FirewallRule(fakeGCE, tc.nsName, tc.params, tc.shared, klog.TODO())
 			if err != nil {
 				t.Errorf("EnsureL4FirewallRule() failed, err=%v", err)
 			}
 			firewall, err := fakeGCE.GetFirewall(tc.params.Name)
 			if err != nil {
 				t.Errorf("failed to get firewall err=%v", err)
+			}
+			if diff := cmp.Diff(ensuredFirewall, firewall, cmpopts.IgnoreFields(compute.Firewall{}, "SelfLink")); diff != "" {
+				t.Errorf("EnsureL4FirewallRule() != GetFirewall() diff -want +got\n%v\n", diff)
 			}
 			if diff := cmp.Diff(tc.want, firewall, cmpopts.IgnoreFields(compute.Firewall{}, "SelfLink")); diff != "" {
 				t.Errorf("EnsureL4FirewallRule() diff -want +got\n%v\n", diff)

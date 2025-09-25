@@ -49,10 +49,13 @@ func (l4 *L4) ensureIPv6Resources(syncResult *L4ILBSyncResult, nodeNames []strin
 	switch ipv6fr.IPProtocol {
 	case forwardingrules.ProtocolTCP:
 		syncResult.Annotations[annotations.TCPForwardingRuleIPv6Key] = ipv6fr.Name
+		syncResult.GCEResourceURLs = append(syncResult.GCEResourceURLs, ipv6fr.SelfLink)
 	case forwardingrules.ProtocolUDP:
 		syncResult.Annotations[annotations.UDPForwardingRuleIPv6Key] = ipv6fr.Name
+		syncResult.GCEResourceURLs = append(syncResult.GCEResourceURLs, ipv6fr.SelfLink)
 	case forwardingrules.ProtocolL3:
 		syncResult.Annotations[annotations.L3ForwardingRuleIPv6Key] = ipv6fr.Name
+		syncResult.GCEResourceURLs = append(syncResult.GCEResourceURLs, ipv6fr.SelfLink)
 	}
 
 	// Google Cloud creates ipv6 forwarding rules with IPAddress in CIDR form. We will take only first address
@@ -184,7 +187,7 @@ func (l4 *L4) ensureIPv6NodesFirewall(ipAddress string, nodeNames []string, resu
 		Network:           l4.network,
 	}
 
-	fwSyncStatus, err := firewalls.EnsureL4LBFirewallForNodes(l4.Service, &ipv6nodesFWRParams, l4.cloud, l4.recorder, fwLogger)
+	fwRule, fwSyncStatus, err := firewalls.EnsureL4LBFirewallForNodes(l4.Service, &ipv6nodesFWRParams, l4.cloud, l4.recorder, fwLogger)
 	result.ResourceUpdates.SetFirewallForNodes(fwSyncStatus)
 	if err != nil {
 		result.GCEResourceInError = annotations.FirewallRuleIPv6Resource
@@ -192,6 +195,7 @@ func (l4 *L4) ensureIPv6NodesFirewall(ipAddress string, nodeNames []string, resu
 		return
 	}
 	result.Annotations[annotations.FirewallRuleIPv6Key] = firewallName
+	result.GCEResourceURLs = append(result.GCEResourceURLs, fwRule.SelfLink)
 }
 
 func (l4 *L4) deleteIPv6ForwardingRule() error {

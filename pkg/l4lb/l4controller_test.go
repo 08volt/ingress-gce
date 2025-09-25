@@ -20,6 +20,9 @@ import (
 	context2 "context"
 	"fmt"
 	"net/http"
+	"reflect"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -31,14 +34,17 @@ import (
 	"k8s.io/ingress-gce/pkg/utils"
 	"k8s.io/klog/v2"
 
+	svclbstatusclient "github.com/GoogleCloudPlatform/gke-networking-api/client/serviceloadbalancerstatus/clientset/versioned/fake"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/mock"
 	api_v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/util/retry"
 	cloudprovider "k8s.io/cloud-provider"
 	"k8s.io/cloud-provider-gcp/providers/gce"
@@ -48,6 +54,7 @@ import (
 	"k8s.io/ingress-gce/pkg/context"
 	"k8s.io/ingress-gce/pkg/flags"
 	svcnegclient "k8s.io/ingress-gce/pkg/svcneg/client/clientset/versioned/fake"
+
 	"k8s.io/ingress-gce/pkg/test"
 	"k8s.io/ingress-gce/pkg/utils/common"
 	"k8s.io/ingress-gce/pkg/utils/namer"
@@ -1025,6 +1032,7 @@ func TestEnsureInternalLoadBalancerClass(t *testing.T) {
 func newServiceController(t *testing.T, fakeGCE *gce.Cloud, readOnlyMode bool) (*L4Controller, chan struct{}) {
 	kubeClient := fake.NewSimpleClientset()
 	svcNegClient := svcnegclient.NewSimpleClientset()
+	svcLBStatusClient := svclbstatusclient.NewSimpleClientset()
 
 	vals := test.DefaultTestClusterValues()
 	namer := namer.NewNamer(clusterUID, "", klog.TODO())
@@ -1036,7 +1044,7 @@ func newServiceController(t *testing.T, fakeGCE *gce.Cloud, readOnlyMode bool) (
 		NumL4Workers: 5,
 		ReadOnlyMode: readOnlyMode,
 	}
-	ctx, err := context.NewControllerContext(kubeClient, nil, nil, nil, svcNegClient, nil, nil, nil, kubeClient /*kube client to be used for events*/, fakeGCE, namer, "" /*kubeSystemUID*/, ctxConfig, klog.TODO())
+	ctx, err := context.NewControllerContext(kubeClient, nil, nil, nil, svcNegClient, nil, nil, nil, svcLBStatusClient, kubeClient /*kube client to be used for events*/, fakeGCE, namer, "" /*kubeSystemUID*/, ctxConfig, klog.TODO())
 	if err != nil {
 		t.Fatalf("failed to initialize controller context: %v", err)
 	}
@@ -1311,5 +1319,231 @@ func TestMultipleServicesProcessingWithLegacyHeadStartTime(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// getExpectedL4ILBResourceURLs is a helper function to generate the expected GCE resource URLs for a given ILB service.
+func getExpectedL4ILBResourceURLs(t *testing.T, l4c *L4Controller, svc *api_v1.Service) []string {
+	t.Helper()
+	var urls []string
+	namer := l4c.namer
+	cloud := l4c.ctx.Cloud
+
+	// Backend Service
+	bsName := namer.L4Backend(svc.Namespace, svc.Name)
+	bsUrl := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/regions/" + cloud.Region() + "/backendServices/" + bsName
+
+	urls = append(urls, bsUrl)
+
+	// Health Check
+	// The health check logic determines if a new one is created or an existing one is reused.
+	// For ETP=Cluster, it's shared. For ETP=Local, it's not.
+	isSharedHC := svc.Spec.ExternalTrafficPolicy == api_v1.ServiceExternalTrafficPolicyTypeCluster
+	hcName := namer.L4HealthCheck(svc.Namespace, svc.Name, isSharedHC)
+
+	hcUrl := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/global/healthChecks/" + hcName
+	urls = append(urls, hcUrl)
+
+	hcFirewallName := namer.L4HealthCheckFirewall(svc.Namespace, svc.Name, isSharedHC)
+	hcFwUrl := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/global/firewalls/" + hcFirewallName
+	urls = append(urls, hcFwUrl)
+
+	// IPv4 Resources
+	if utils.NeedsIPv4(svc) {
+		// Forwarding Rule
+		frName := namer.L4ForwardingRule(svc.Namespace, svc.Name, "tcp")
+		frUrl := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/regions/" + cloud.Region() + "/forwardingRules/" + frName
+		urls = append(urls, frUrl)
+
+		// Firewall Rule
+		fwName := namer.L4Firewall(svc.Namespace, svc.Name)
+		fwUrl := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/global/firewalls/" + fwName
+		urls = append(urls, fwUrl)
+
+	}
+
+	// IPv6 Resources
+	if utils.NeedsIPv6(svc) {
+		// IPv6 Forwarding Rule
+		frNameIPv6 := namer.L4IPv6ForwardingRule(svc.Namespace, svc.Name, "tcp")
+		frUrlIPv6 := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/regions/" + cloud.Region() + "/forwardingRules/" + frNameIPv6
+		urls = append(urls, frUrlIPv6)
+
+		// IPv6 Firewall Rule
+		fwNameIPv6 := namer.L4IPv6Firewall(svc.Namespace, svc.Name)
+		fwUrlIPv6 := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/global/firewalls/" + fwNameIPv6
+		urls = append(urls, fwUrlIPv6)
+
+		// IPv6 Health Check Firewall Rule
+		hcFirewallNameIPv6 := namer.L4IPv6HealthCheckFirewall(svc.Namespace, svc.Name, isSharedHC)
+		hcFwUrlIPv6 := "https://www.googleapis.com/compute/v1/projects/" + cloud.ProjectID() + "/global/firewalls/" + hcFirewallNameIPv6
+		urls = append(urls, hcFwUrlIPv6)
+	}
+
+	sort.Strings(urls)
+	return urls
+}
+
+func TestServiceLoadBalancerStatusCRWorkflow(t *testing.T) {
+	t.Parallel()
+	l4c, _ := newServiceController(t, newFakeGCE(), false)
+	l4c.enableDualStack = true
+	test.MustCreateDualStackClusterSubnet(t, l4c.ctx.Cloud, "INTERNAL")
+
+	// 1. Create IPv4-only service and verify CR creation
+	ipv4Svc := test.NewL4ILBDualStackService(8080, api_v1.ProtocolTCP, []api_v1.IPFamily{api_v1.IPv4Protocol}, api_v1.ServiceExternalTrafficPolicyTypeCluster)
+	addILBService(l4c, ipv4Svc)
+	addNEGAndSvcNegL4Controller(l4c, ipv4Svc)
+
+	key := getKeyForSvc(ipv4Svc, t)
+	if err := l4c.sync(key, klog.TODO()); err != nil {
+		t.Fatalf("l4c.sync() = %v, want nil", err)
+	}
+
+	crName := ipv4Svc.Name + "-status"
+	cr, err := l4c.ctx.SvcLBStatusClient.NetworkingV1().ServiceLoadBalancerStatuses(ipv4Svc.Namespace).Get(context2.TODO(), crName, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get ServiceLoadBalancerStatus CR %s/%s: %v", ipv4Svc.Namespace, crName, err)
+	}
+
+	if len(cr.OwnerReferences) != 1 || cr.OwnerReferences[0].UID != ipv4Svc.UID {
+		t.Errorf("CR OwnerReference is incorrect, got %+v, want owner UID %s", cr.OwnerReferences, ipv4Svc.UID)
+	}
+
+	// Fetch the service from the informer to get its UID for owner reference check.
+	svcFromStore, exists, err := l4c.ctx.Services().GetByKey(key)
+	if !exists || err != nil {
+		t.Fatalf("Failed to retrieve service from store: %v", err)
+	}
+	if len(cr.OwnerReferences) != 1 || cr.OwnerReferences[0].UID != svcFromStore.GetUID() {
+		t.Errorf("CR OwnerReference is incorrect, got %+v, want owner UID %s", cr.OwnerReferences, svcFromStore.GetUID())
+	}
+
+	expectedURLs := getExpectedL4ILBResourceURLs(t, l4c, ipv4Svc)
+	sort.Strings(cr.Status.GceResources)
+	if !reflect.DeepEqual(cr.Status.GceResources, expectedURLs) {
+		t.Errorf("CR GceResources mismatch.\nGot: %v\nWant: %v", cr.Status.GceResources, expectedURLs)
+	}
+
+	// 2. No-op resync, verify CR is not updated
+	if err := l4c.sync(key, klog.TODO()); err != nil {
+		t.Fatalf("l4c.sync() for no-op = %v, want nil", err)
+	}
+	cr, err = l4c.ctx.SvcLBStatusClient.NetworkingV1().ServiceLoadBalancerStatuses(ipv4Svc.Namespace).Get(context2.TODO(), crName, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get ServiceLoadBalancerStatus CR after no-op sync: %v", err)
+	}
+
+	// 3. Update service to dual-stack, verify CR is updated
+	svcFromInformer, exists, err := l4c.ctx.Services().GetByKey(key)
+	if !exists || err != nil {
+		t.Fatalf("Failed to get service from informer: %v", err)
+	}
+	dualStackSvc := svcFromInformer.DeepCopy()
+	dualStackSvc.Spec.IPFamilies = []api_v1.IPFamily{api_v1.IPv4Protocol, api_v1.IPv6Protocol}
+	updateILBService(l4c, dualStackSvc)
+
+	if err := l4c.sync(key, klog.TODO()); err != nil {
+		t.Fatalf("l4c.sync() for update = %v, want nil", err)
+	}
+	cr, err = l4c.ctx.SvcLBStatusClient.NetworkingV1().ServiceLoadBalancerStatuses(dualStackSvc.Namespace).Get(context2.TODO(), crName, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get ServiceLoadBalancerStatus CR after update: %v", err)
+	}
+
+	updatedSvc, err := l4c.client.CoreV1().Services(dualStackSvc.Namespace).Get(context2.TODO(), dualStackSvc.Name, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get updated service: %v", err)
+	}
+	expectedURLs = getExpectedL4ILBResourceURLs(t, l4c, updatedSvc)
+	sort.Strings(cr.Status.GceResources)
+	if !reflect.DeepEqual(cr.Status.GceResources, expectedURLs) {
+		t.Errorf("CR GceResources mismatch after update.\nGot: %v\nWant: %v", cr.Status.GceResources, expectedURLs)
+	}
+
+	// 4. Delete the service, verify CR status is cleared
+	svcForDeletion := updatedSvc.DeepCopy()
+	svcForDeletion.DeletionTimestamp = &v1.Time{Time: time.Now()}
+	updateILBService(l4c, svcForDeletion)
+
+	if err := l4c.sync(key, klog.TODO()); err != nil {
+		t.Fatalf("l4c.sync() for deletion = %v, want nil", err)
+	}
+
+	cr, err = l4c.ctx.SvcLBStatusClient.NetworkingV1().ServiceLoadBalancerStatuses(svcForDeletion.Namespace).Get(context2.TODO(), crName, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get ServiceLoadBalancerStatus CR during deletion: %v", err)
+	}
+	if len(cr.Status.GceResources) != 0 {
+		t.Errorf("Expected GceResources to be empty during deletion, got %v", cr.Status.GceResources)
+	}
+
+	finalSvc, err := l4c.client.CoreV1().Services(svcForDeletion.Namespace).Get(context2.TODO(), svcForDeletion.Name, v1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get service after deletion sync: %v", err)
+	}
+	if common.HasGivenFinalizer(finalSvc.ObjectMeta, common.ILBFinalizerV2) {
+		t.Errorf("Service finalizer was not removed after deletion sync")
+	}
+}
+
+func TestServiceLoadBalancerStatusCRCreationError(t *testing.T) {
+	t.Parallel()
+	l4c, _ := newServiceController(t, newFakeGCE(), false)
+
+	l4c.ctx.SvcLBStatusClient.(*svclbstatusclient.Clientset).Fake.PrependReactor("create", "serviceloadbalancerstatuses", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, fmt.Errorf("mock error: failed to create CR")
+	})
+
+	svc := test.NewL4ILBService(false, 8080)
+	addILBService(l4c, svc)
+	addNEGAndSvcNegL4Controller(l4c, svc)
+
+	key := getKeyForSvc(svc, t)
+	err := l4c.sync(key, klog.TODO())
+
+	if err == nil {
+		t.Fatalf("l4c.sync() returned nil, want error")
+	}
+	expectedErr := "failed to ensure ServiceLoadBalancerStatus CR"
+	if !strings.Contains(err.Error(), expectedErr) {
+		t.Errorf("l4c.sync() returned error %q, want it to contain %q", err.Error(), expectedErr)
+	}
+}
+
+func TestServiceLoadBalancerStatusCRUpdateError(t *testing.T) {
+	t.Parallel()
+	l4c, _ := newServiceController(t, newFakeGCE(), false)
+
+	svc := test.NewL4ILBService(false, 8080)
+	addILBService(l4c, svc)
+	addNEGAndSvcNegL4Controller(l4c, svc)
+
+	key := getKeyForSvc(svc, t)
+	if err := l4c.sync(key, klog.TODO()); err != nil {
+		t.Fatalf("Initial l4c.sync() = %v, want nil", err)
+	}
+	l4c.ctx.SvcLBStatusClient.(*svclbstatusclient.Clientset).Fake.PrependReactor("update", "serviceloadbalancerstatuses", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+		return true, nil, fmt.Errorf("mock error: failed to update CR")
+	})
+
+	// Update the service to trigger a CR update
+	// Change ExternalTrafficPolicy since it's guaranteed to be different from the default value.
+	// Changing IPFamilies may not trigger an update if the test infra decides to create an IPv4-only service.
+	svcFromInformer, exists, err := l4c.ctx.Services().GetByKey(key)
+	if !exists || err != nil {
+		t.Fatalf("Failed to get service from informer: %v", err)
+	}
+	updatedSvc := svcFromInformer.DeepCopy()
+	updatedSvc.Spec.ExternalTrafficPolicy = api_v1.ServiceExternalTrafficPolicyTypeLocal
+	updateILBService(l4c, updatedSvc)
+
+	err = l4c.sync(key, klog.TODO())
+	if err == nil {
+		t.Fatalf("l4c.sync() returned nil, want error")
+	}
+	expectedErr := "failed to ensure ServiceLoadBalancerStatus CR"
+	if !strings.Contains(err.Error(), expectedErr) {
+		t.Errorf("l4c.sync() returned error %q, want it to contain %q", err.Error(), expectedErr)
 	}
 }

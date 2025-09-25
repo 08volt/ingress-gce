@@ -411,6 +411,16 @@ func (l4c *L4Controller) processServiceCreateOrUpdate(service *v1.Service, svcLo
 			return syncResult
 		}
 	}
+	if syncResult != nil {
+		err = ensureServiceLoadBalancerStatusCR(l4c.ctx, service, syncResult.GCEResourceURLs, svcLogger)
+		if err != nil {
+			l4c.ctx.Recorder(service.Namespace).Eventf(service, v1.EventTypeWarning, "SyncLoadBalancerFailed",
+				"Failed to update ServiceLoadBalancerStatus CR, err: %v", err)
+			syncResult.Error = fmt.Errorf("failed to ensure ServiceLoadBalancerStatus CR, err: %w", err)
+			return syncResult
+		}
+	}
+
 	return syncResult
 }
 
@@ -453,6 +463,15 @@ func (l4c *L4Controller) processServiceDeletion(key string, svc *v1.Service, svc
 		l4c.ctx.Recorder(svc.Namespace).Eventf(svc, v1.EventTypeWarning, "DeleteLoadBalancerFailed", "Error deleting load balancer: %v", result.Error)
 		return result
 	}
+
+	// After successful cloud resource deletion, clear the ServiceLoadBalancerStatus CR.
+	if err := ensureServiceLoadBalancerStatusCR(l4c.ctx, svc, []string{}, svcLogger); err != nil {
+		l4c.ctx.Recorder(svc.Namespace).Eventf(svc, v1.EventTypeWarning, "DeleteLoadBalancer",
+			"Error clearing ServiceLoadBalancerStatus CR: %v", err)
+		result.Error = fmt.Errorf("failed to clear ServiceLoadBalancerStatus CR, err: %w", err)
+		return result
+	}
+
 	// Reset the loadbalancer status first, before resetting annotations.
 	// Other controllers(like service-controller) will process the service update if annotations change, but will ignore a service status change.
 	// Following this order avoids a race condition when a service is changed from LoadBalancer type Internal to External.

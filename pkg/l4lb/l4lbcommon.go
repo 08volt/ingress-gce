@@ -17,16 +17,19 @@ limitations under the License.
 package l4lb
 
 import (
+	"context"
 	"fmt"
 	"reflect"
 
+	svcLBStatus "github.com/GoogleCloudPlatform/gke-networking-api/apis/serviceloadbalancerstatus/v1"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cloud-provider-gcp/providers/gce"
 	"k8s.io/cloud-provider/service/helpers"
 	"k8s.io/ingress-gce/pkg/composite"
-	"k8s.io/ingress-gce/pkg/context"
+	ctx "k8s.io/ingress-gce/pkg/context"
 	l4metrics "k8s.io/ingress-gce/pkg/l4lb/metrics"
 	"k8s.io/ingress-gce/pkg/loadbalancers"
 	"k8s.io/ingress-gce/pkg/utils"
@@ -67,7 +70,7 @@ func mergeAnnotations(existing, lbAnnotations map[string]string, keysToRemove []
 }
 
 // updateL4ResourcesAnnotations checks if new annotations should be added to service and patch service metadata if needed.
-func updateL4ResourcesAnnotations(ctx *context.ControllerContext, svc *v1.Service, newL4LBAnnotations map[string]string, svcLogger klog.Logger) error {
+func updateL4ResourcesAnnotations(ctx *ctx.ControllerContext, svc *v1.Service, newL4LBAnnotations map[string]string, svcLogger klog.Logger) error {
 	svcLogger.V(3).Info("Updating annotations of service")
 	newObjectMeta := computeNewAnnotationsIfNeeded(svc, newL4LBAnnotations, loadbalancers.L4ResourceAnnotationKeys)
 	if newObjectMeta == nil {
@@ -79,7 +82,7 @@ func updateL4ResourcesAnnotations(ctx *context.ControllerContext, svc *v1.Servic
 }
 
 // updateL4DualStackResourcesAnnotations checks if new annotations should be added to dual-stack service and patch service metadata if needed.
-func updateL4DualStackResourcesAnnotations(ctx *context.ControllerContext, svc *v1.Service, newL4LBAnnotations map[string]string, svcLogger klog.Logger) error {
+func updateL4DualStackResourcesAnnotations(ctx *ctx.ControllerContext, svc *v1.Service, newL4LBAnnotations map[string]string, svcLogger klog.Logger) error {
 	newObjectMeta := computeNewAnnotationsIfNeeded(svc, newL4LBAnnotations, loadbalancers.L4DualStackResourceAnnotationKeys)
 	if newObjectMeta == nil {
 		return nil
@@ -88,7 +91,7 @@ func updateL4DualStackResourcesAnnotations(ctx *context.ControllerContext, svc *
 	return patch.PatchServiceObjectMetadata(ctx.KubeClient.CoreV1(), svc, *newObjectMeta)
 }
 
-func deleteAnnotation(ctx *context.ControllerContext, svc *v1.Service, annotationKey string, svcLogger klog.Logger) error {
+func deleteAnnotation(ctx *ctx.ControllerContext, svc *v1.Service, annotationKey string, svcLogger klog.Logger) error {
 	newObjectMeta := svc.ObjectMeta.DeepCopy()
 	if _, ok := newObjectMeta.Annotations[annotationKey]; !ok {
 		return nil
@@ -99,7 +102,7 @@ func deleteAnnotation(ctx *context.ControllerContext, svc *v1.Service, annotatio
 }
 
 // updateServiceStatus this faction checks if LoadBalancer status changed and patch service if needed.
-func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, svcLogger klog.Logger) error {
+func updateServiceStatus(ctx *ctx.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, svcLogger klog.Logger) error {
 	svcLogger.V(2).Info("Updating service status", "newStatus", fmt.Sprintf("%+v", newStatus))
 	if helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus) {
 		svcLogger.V(2).Info("New and old statuses are equal, skipping patch")
@@ -126,7 +129,7 @@ func skipUserError(err error, svcLogger klog.Logger) error {
 // * emits a warning event,
 // * increases metric counter
 // for finalizers that were removed.
-func warnL4FinalizerRemoved(ctx *context.ControllerContext, oldService, newService *v1.Service) {
+func warnL4FinalizerRemoved(ctx *ctx.ControllerContext, oldService, newService *v1.Service) {
 
 	l4FinalizersWithMetrics := map[string]func(){
 		common.LegacyILBFinalizer:           l4metrics.PublishL4RemovedILBLegacyFinalizer,
@@ -153,4 +156,96 @@ func finalizerWasRemovedUnexpectedly(oldService, newService *v1.Service, finaliz
 	// If the service was added for deletion, we don't need finalizers
 	svcToBeDeleted := newService.ObjectMeta.DeletionTimestamp != nil
 	return oldSvcHasLegacyFinalizer && !newSvcHasLegacyFinalizer && !svcToBeDeleted
+}
+
+// serviceLoadBalancerStatusResourcesEqual checks if the GceResources in two statuses are equal.
+// It compares GceResources as a multiset (bag), ignoring order.
+func serviceLoadBalancerStatusResourcesEqual(a, b svcLBStatus.ServiceLoadBalancerStatusStatus) bool {
+	if len(a.GceResources) != len(b.GceResources) {
+		return false
+	}
+
+	resourceCounts := make(map[string]int, len(a.GceResources))
+	for _, res := range a.GceResources {
+		resourceCounts[res]++
+	}
+
+	for _, res := range b.GceResources {
+		if count, ok := resourceCounts[res]; !ok || count == 0 {
+			return false
+		}
+		resourceCounts[res]--
+	}
+
+	return true
+}
+
+// GenerateServiceLoadBalancerStatus creates a ServiceLoadBalancerStatus CR from a Service and GCEResources.
+// It populates the .spec with the service reference and .status with the resource URLs.
+func GenerateServiceLoadBalancerStatus(service *v1.Service, gceResources []string) *svcLBStatus.ServiceLoadBalancerStatus {
+	if service == nil {
+		return nil
+	}
+
+	return &svcLBStatus.ServiceLoadBalancerStatus{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      service.Name + "-status",
+			Namespace: service.Namespace,
+			OwnerReferences: []metav1.OwnerReference{
+				*metav1.NewControllerRef(service, v1.SchemeGroupVersion.WithKind("Service")),
+			},
+		},
+		Spec: svcLBStatus.ServiceLoadBalancerStatusSpec{},
+		Status: svcLBStatus.ServiceLoadBalancerStatusStatus{
+			GceResources: gceResources,
+		},
+	}
+}
+
+// ensureServiceLoadBalancerStatusCR ensures the ServiceLoadBalancerStatus CR
+// exists for the given Service and that its spec and status are up-to-date.
+// It keeps the CR even if the list of GCE resources is empty.
+func ensureServiceLoadBalancerStatusCR(ctx *ctx.ControllerContext, service *v1.Service, gceResourceURLs []string, logger klog.Logger) error {
+	desiredServiceLBStatus := GenerateServiceLoadBalancerStatus(service, gceResourceURLs)
+	if desiredServiceLBStatus == nil {
+		logger.V(4).Info("Generated ServiceLoadBalancerStatus CR is nil, skipping")
+		return nil
+	}
+	serviceLBStatusClient := ctx.SvcLBStatusClient.NetworkingV1().ServiceLoadBalancerStatuses(service.Namespace)
+
+	// Try to get the existing CR from the cluster.
+	existingLBStatus, err := serviceLBStatusClient.Get(context.TODO(), desiredServiceLBStatus.Name, metav1.GetOptions{})
+	if err != nil {
+		if !errors.IsNotFound(err) {
+			logger.Error(err, "Failed to get ServiceLoadBalancerStatus CR", "crName", desiredServiceLBStatus.Name)
+			return err
+		}
+
+		// CR does not exist, create it.
+		logger.V(2).Info("ServiceLoadBalancerStatus CR not found, creating it", "crName", desiredServiceLBStatus.Name)
+		_, createErr := serviceLBStatusClient.Create(context.TODO(), desiredServiceLBStatus, metav1.CreateOptions{})
+		if createErr != nil {
+			logger.Error(createErr, "Failed to create ServiceLoadBalancerStatus CR", "crName", desiredServiceLBStatus.Name)
+			return createErr
+		}
+		logger.V(2).Info("Successfully created ServiceLoadBalancerStatus CR", "crName", desiredServiceLBStatus.Name)
+		return nil
+	}
+
+	statusChanged := !serviceLoadBalancerStatusResourcesEqual(existingLBStatus.Status, desiredServiceLBStatus.Status)
+
+	if statusChanged {
+		logger.V(2).Info("ServiceLoadBalancerStatus CR status has changed, updating it", "crName", desiredServiceLBStatus.Name)
+		existingLBStatus.Status = desiredServiceLBStatus.Status
+		_, err := serviceLBStatusClient.UpdateStatus(context.TODO(), existingLBStatus, metav1.UpdateOptions{})
+
+		if err != nil {
+			logger.Error(err, "Failed to update ServiceLoadBalancerStatus CR status", "crName", desiredServiceLBStatus.Name)
+			return err
+		}
+		logger.V(2).Info("Successfully updated ServiceLoadBalancerStatus CR status", "crName", desiredServiceLBStatus.Name)
+	} else {
+		logger.V(3).Info("ServiceLoadBalancerStatus CR is already up-to-date", "crName", desiredServiceLBStatus.Name)
+	}
+	return nil
 }

@@ -260,3 +260,5 @@ require (
 )
 
 tool github.com/golangci/golangci-lint/cmd/golangci-lint
+
+replace github.com/GoogleCloudPlatform/gke-networking-api => github.com/08volt/gke-networking-api v0.2.1-0.20251009151344-cc8d454f80f8

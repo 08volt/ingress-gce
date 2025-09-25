@@ -29,6 +29,7 @@ import (
 
 	networkv1 "github.com/GoogleCloudPlatform/gke-networking-api/apis/network/v1"
 	netfake "github.com/GoogleCloudPlatform/gke-networking-api/client/network/clientset/versioned/fake"
+	svclbstatusclient "github.com/GoogleCloudPlatform/gke-networking-api/client/serviceloadbalancerstatus/clientset/versioned/fake"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/mock"
@@ -314,6 +315,7 @@ func buildContext(vals gce.TestClusterValues, readOnlyMode bool) (*ingctx.Contro
 	kubeClient := fake.NewSimpleClientset()
 	networkClient := netfake.NewSimpleClientset()
 	svcNegClient := svcnegclient.NewSimpleClientset()
+	svcLBStatusClient := svclbstatusclient.NewSimpleClientset()
 
 	namer := namer.NewNamer(clusterUID, "", klog.TODO())
 
@@ -324,7 +326,7 @@ func buildContext(vals gce.TestClusterValues, readOnlyMode bool) (*ingctx.Contro
 		MaxIGSize:         1000,
 		ReadOnlyMode:      readOnlyMode,
 	}
-	return ingctx.NewControllerContext(kubeClient, nil, nil, nil, svcNegClient, nil, networkClient, nil, kubeClient /*kube client to be used for events*/, fakeGCE, namer, "" /*kubeSystemUID*/, ctxConfig, klog.TODO())
+	return ingctx.NewControllerContext(kubeClient, nil, nil, nil, svcNegClient, nil, networkClient, nil, svcLBStatusClient, kubeClient /*kube client to be used for events*/, fakeGCE, namer, "" /*kubeSystemUID*/, ctxConfig, klog.TODO())
 }
 
 func newL4NetLBServiceController() *L4NetLBController {
