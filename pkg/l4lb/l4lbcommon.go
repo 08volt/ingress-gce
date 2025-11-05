@@ -22,6 +22,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	v1 "k8s.io/api/core/v1"
+	metaapi "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/cloud-provider-gcp/providers/gce"
 	"k8s.io/cloud-provider/service/helpers"
@@ -99,13 +100,36 @@ func deleteAnnotation(ctx *context.ControllerContext, svc *v1.Service, annotatio
 }
 
 // updateServiceStatus this faction checks if LoadBalancer status changed and patch service if needed.
-func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, svcLogger klog.Logger) error {
-	svcLogger.V(2).Info("Updating service status", "newStatus", fmt.Sprintf("%+v", newStatus))
-	if helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus) {
-		svcLogger.V(2).Info("New and old statuses are equal, skipping patch")
-		return nil
+func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, newConditions []metav1.Condition, svcLogger klog.Logger) error {
+	svcLogger.V(2).Info("Updating service status and conditions", "newStatus", fmt.Sprintf("%+v", newStatus), "newConditions", fmt.Sprintf("%+v", newConditions))
+
+	expectedConditions := make([]metav1.Condition, len(svc.Status.Conditions))
+	copy(expectedConditions, svc.Status.Conditions)
+
+	changedConditions := false
+
+	for _, newCondition := range newConditions {
+		svcLogger.V(3).Info("New condition to be set", "condition", fmt.Sprintf("%+v", newCondition))
+		changedConditions = metaapi.SetStatusCondition(&expectedConditions, newCondition) || changedConditions
 	}
-	return patch.PatchServiceLoadBalancerStatus(ctx.KubeClient.CoreV1(), svc, *newStatus)
+
+	lbStatusEqual := helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus)
+
+	if !lbStatusEqual && changedConditions {
+		svcLogger.V(2).Info("Patching both LoadBalancer status and Conditions")
+		return patch.PatchServiceStatus(ctx.KubeClient.CoreV1(), svc, v1.ServiceStatus{
+			LoadBalancer: *newStatus,
+			Conditions:   expectedConditions,
+		})
+	} else if !lbStatusEqual {
+		svcLogger.V(2).Info("Patching LoadBalancer status only")
+		return patch.PatchServiceLoadBalancerStatus(ctx.KubeClient.CoreV1(), svc, *newStatus)
+	} else if changedConditions {
+		svcLogger.V(2).Info("Patching Conditions only")
+		return patch.PatchServiceConditions(ctx.KubeClient.CoreV1(), svc, expectedConditions)
+	}
+	svcLogger.V(3).Info("Service status not changed, skipping patch for service")
+	return nil
 }
 
 // isHealthCheckDeleted checks if given health check exists in GCE

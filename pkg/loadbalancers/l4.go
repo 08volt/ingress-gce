@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	"google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -87,6 +88,7 @@ type L4ILBSyncResult struct {
 	Annotations        map[string]string
 	Error              error
 	GCEResourceInError string
+	Conditions         []metav1.Condition
 	Status             *corev1.LoadBalancerStatus
 	MetricsLegacyState metrics.L4ILBServiceLegacyState
 	MetricsState       metrics.L4ServiceState
@@ -589,6 +591,8 @@ func (l4 *L4) EnsureInternalLoadBalancer(nodeNames []string, svc *corev1.Service
 		return result
 	}
 	result.Annotations[annotations.BackendServiceKey] = bsName
+	result.Conditions = append(result.Conditions, utils.NewBackendServiceCondition(bsName))
+
 	if bs.LogConfig != nil {
 		result.MetricsState.LoggingEnabled = bs.LogConfig.Enable
 	}
@@ -643,17 +647,20 @@ func (l4 *L4) provideDualStackHealthChecks(nodeNames []string, result *L4ILBSync
 
 	if hcResult.HCFirewallRuleName != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+		result.Conditions = append(result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckKey)
 	}
 
 	if hcResult.HCFirewallRuleIPv6Name != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckIPv6Key] = hcResult.HCFirewallRuleIPv6Name
+		result.Conditions = append(result.Conditions, utils.NewFirewallHealthCheckIPv6Condition(hcResult.HCFirewallRuleIPv6Name))
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckIPv6Key)
 	}
 
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
+	result.Conditions = append(result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	return hcResult.HCLink
 }
 
@@ -668,7 +675,9 @@ func (l4 *L4) provideIPv4HealthChecks(nodeNames []string, result *L4ILBSyncResul
 		return ""
 	}
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
+	result.Conditions = append(result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+	result.Conditions = append(result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
 	return hcResult.HCLink
 }
 
@@ -701,10 +710,13 @@ func (l4 *L4) ensureIPv4Resources(result *L4ILBSyncResult, nodeNames []string, o
 	switch fr.IPProtocol {
 	case forwardingrules.ProtocolTCP:
 		result.Annotations[annotations.TCPForwardingRuleKey] = fr.Name
+		result.Conditions = append(result.Conditions, utils.NewTCPForwardingRuleCondition(fr.Name))
 	case forwardingrules.ProtocolUDP:
 		result.Annotations[annotations.UDPForwardingRuleKey] = fr.Name
+		result.Conditions = append(result.Conditions, utils.NewUDPForwardingRuleCondition(fr.Name))
 	case forwardingrules.ProtocolL3:
 		result.Annotations[annotations.L3ForwardingRuleKey] = fr.Name
+		result.Conditions = append(result.Conditions, utils.NewL3ForwardingRuleCondition(fr.Name))
 	}
 
 	l4.ensureIPv4NodesFirewall(nodeNames, fr.IPAddress, result)
@@ -771,6 +783,7 @@ func (l4 *L4) ensureIPv4NodesFirewall(nodeNames []string, ipAddress string, resu
 		return
 	}
 	result.Annotations[annotations.FirewallRuleKey] = firewallName
+	result.Conditions = append(result.Conditions, utils.NewFirewallCondition(firewallName))
 }
 
 func (l4 *L4) getServiceSubnetworkURL(options gce.ILBOptions) (string, error) {

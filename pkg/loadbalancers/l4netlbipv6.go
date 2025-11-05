@@ -52,8 +52,10 @@ func (l4netlb *L4NetLB) ensureIPv6Resources(syncResult *L4NetLBSyncResult, nodeN
 
 	if ipv6fr.IPProtocol == string(corev1.ProtocolTCP) {
 		syncResult.Annotations[annotations.TCPForwardingRuleIPv6Key] = ipv6fr.Name
+		syncResult.Conditions = append(syncResult.Conditions, utils.NewTCPIPv6ForwardingRuleCondition(ipv6fr.Name))
 	} else {
 		syncResult.Annotations[annotations.UDPForwardingRuleIPv6Key] = ipv6fr.Name
+		syncResult.Conditions = append(syncResult.Conditions, utils.NewUDPIPv6ForwardingRuleCondition(ipv6fr.Name))
 	}
 
 	// Google Cloud creates ipv6 forwarding rules with IPAddress in CIDR form. We will take only first address
@@ -158,6 +160,7 @@ func (l4netlb *L4NetLB) ensureIPv6NodesFirewall(ipAddress string, nodeNames []st
 		return
 	}
 	syncResult.Annotations[annotations.FirewallRuleIPv6Key] = firewallName
+	syncResult.Conditions = append(syncResult.Conditions, utils.NewIPv6FirewallCondition(firewallName))
 }
 
 func (l4netlb *L4NetLB) deleteIPv6ForwardingRule(syncResult *L4NetLBSyncResult) {
