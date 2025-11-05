@@ -102,3 +102,21 @@ func PatchProviderConfigObjectMetadata(client providerconfigclient.Interface, pc
 	_, err = client.CloudV1().ProviderConfigs().Patch(context.Background(), newPC.Name, types.MergePatchType, patchBytes, metav1.PatchOptions{})
 	return err
 }
+
+// PatchServiceLoadBalancerStatus patches the given service's LoadBalancerStatus
+// based on new service's load-balancer status.
+func PatchServiceConditions(client coreclient.CoreV1Interface, svc *corev1.Service, newConditions []metav1.Condition) error {
+	newSvc := svc.DeepCopy()
+	newSvc.Status.Conditions = newConditions
+	_, err := svchelpers.PatchService(client, svc, newSvc)
+	return err
+}
+
+// PatchServiceStatus patches the given service's ServiceStatus
+// based on new service's status.
+func PatchServiceStatus(client coreclient.CoreV1Interface, svc *corev1.Service, newStatus corev1.ServiceStatus) error {
+	newSvc := svc.DeepCopy()
+	newSvc.Status = newStatus
+	_, err := svchelpers.PatchService(client, svc, newSvc)
+	return err
+}

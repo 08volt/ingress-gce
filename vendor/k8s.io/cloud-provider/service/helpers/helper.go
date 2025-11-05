@@ -127,6 +127,27 @@ func LoadBalancerStatusEqual(l, r *v1.LoadBalancerStatus) bool {
 	return ingressSliceEqual(l.Ingress, r.Ingress)
 }
 
+// LoadBalancerConditionsEqual checks if load balancer conditions are equal
+func LoadBalancerConditionsEqual(l, r []metav1.Condition) bool {
+	if len(l) != len(r) {
+		return false
+	}
+	lMap := make(map[string]metav1.Condition)
+	for _, cond := range l {
+		lMap[cond.Type] = cond
+	}
+	for _, condR := range r {
+		condL, found := lMap[condR.Type]
+		if !found {
+			return false
+		}
+		if condL.Status != condR.Status || condL.Reason != condR.Reason || condL.Message != condR.Message {
+			return false
+		}
+	}
+	return true
+}
+
 // PatchService patches the given service's Status or ObjectMeta based on the original and
 // updated ones. Change to spec will be ignored.
 func PatchService(c corev1.CoreV1Interface, oldSvc, newSvc *v1.Service) (*v1.Service, error) {

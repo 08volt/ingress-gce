@@ -99,13 +99,27 @@ func deleteAnnotation(ctx *context.ControllerContext, svc *v1.Service, annotatio
 }
 
 // updateServiceStatus this faction checks if LoadBalancer status changed and patch service if needed.
-func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, svcLogger klog.Logger) error {
-	svcLogger.V(2).Info("Updating service status", "newStatus", fmt.Sprintf("%+v", newStatus))
-	if helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus) {
-		svcLogger.V(2).Info("New and old statuses are equal, skipping patch")
-		return nil
+func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, newConditions []metav1.Condition, svcLogger klog.Logger) error {
+	svcLogger.V(2).Info("Updating service status and conditions", "newStatus", fmt.Sprintf("%+v", newStatus), "newConditions", fmt.Sprintf("%+v", newConditions))
+
+	lbStatusEqual := helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus)
+	lbConditionsEqual := helpers.LoadBalancerConditionsEqual(svc.Status.Conditions, newConditions)
+
+	if !lbStatusEqual && !lbConditionsEqual {
+		svcLogger.V(2).Info("Patching both LoadBalancer status and Conditions", "newStatus", fmt.Sprintf("%+v", newStatus), "newConditions", fmt.Sprintf("%+v", newConditions))
+		return patch.PatchServiceStatus(ctx.KubeClient.CoreV1(), svc, v1.ServiceStatus{
+			LoadBalancer: *newStatus,
+			Conditions:   newConditions,
+		})
+	} else if !lbStatusEqual {
+		svcLogger.V(2).Info("Patching LoadBalancer status only", "newStatus", fmt.Sprintf("%+v", newStatus))
+		return patch.PatchServiceLoadBalancerStatus(ctx.KubeClient.CoreV1(), svc, *newStatus)
+	} else if !lbConditionsEqual {
+		svcLogger.V(2).Info("Patching Conditions only", "newConditions", fmt.Sprintf("%+v", newConditions))
+		return patch.PatchServiceConditions(ctx.KubeClient.CoreV1(), svc, newConditions)
 	}
-	return patch.PatchServiceLoadBalancerStatus(ctx.KubeClient.CoreV1(), svc, *newStatus)
+	svcLogger.V(3).Info("Service status not changed, skipping patch for service")
+	return nil
 }
 
 // isHealthCheckDeleted checks if given health check exists in GCE

@@ -25,6 +25,7 @@ import (
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	compute "google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
+	metaapi "k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/ingress-gce/pkg/annotations"
 	"k8s.io/ingress-gce/pkg/firewalls"
 	"k8s.io/ingress-gce/pkg/utils"
@@ -52,8 +53,12 @@ func (l4netlb *L4NetLB) ensureIPv6Resources(syncResult *L4NetLBSyncResult, nodeN
 
 	if ipv6fr.IPProtocol == string(corev1.ProtocolTCP) {
 		syncResult.Annotations[annotations.TCPForwardingRuleIPv6Key] = ipv6fr.Name
+		metaapi.SetStatusCondition(&syncResult.Conditions, utils.NewTCPIPv6ForwardingRuleCondition(ipv6fr.Name))
+		metaapi.RemoveStatusCondition(&syncResult.Conditions, utils.UDPIPv6ForwardingRuleConditionType)
 	} else {
 		syncResult.Annotations[annotations.UDPForwardingRuleIPv6Key] = ipv6fr.Name
+		metaapi.SetStatusCondition(&syncResult.Conditions, utils.NewUDPIPv6ForwardingRuleCondition(ipv6fr.Name))
+		metaapi.RemoveStatusCondition(&syncResult.Conditions, utils.TCPIPv6ForwardingRuleConditionType)
 	}
 
 	// Google Cloud creates ipv6 forwarding rules with IPAddress in CIDR form. We will take only first address
@@ -158,6 +163,7 @@ func (l4netlb *L4NetLB) ensureIPv6NodesFirewall(ipAddress string, nodeNames []st
 		return
 	}
 	syncResult.Annotations[annotations.FirewallRuleIPv6Key] = firewallName
+	metaapi.SetStatusCondition(&syncResult.Conditions, utils.NewIPv6FirewallCondition(firewallName))
 }
 
 func (l4netlb *L4NetLB) deleteIPv6ForwardingRule(syncResult *L4NetLBSyncResult) {

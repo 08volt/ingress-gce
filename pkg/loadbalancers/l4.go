@@ -26,6 +26,8 @@ import (
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	"google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
+	metaapi "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -87,6 +89,7 @@ type L4ILBSyncResult struct {
 	Annotations        map[string]string
 	Error              error
 	GCEResourceInError string
+	Conditions         []metav1.Condition
 	Status             *corev1.LoadBalancerStatus
 	MetricsLegacyState metrics.L4ILBServiceLegacyState
 	MetricsState       metrics.L4ServiceState
@@ -103,6 +106,7 @@ func NewL4ILBSyncResult(syncType string, startTime time.Time, svc *corev1.Servic
 		SyncType:    syncType,
 		// Internal Load Balancer doesn't support strong session affinity (passing `false` all along)
 		MetricsState: metrics.InitServiceMetricsState(svc, &startTime, isMultinetService, enabledStrongSessionAffinity, isWeightedLBPodsPerNode, isLBWithZonalAffinity, metrics.L4BackendTypeNEG),
+		Conditions:   append([]metav1.Condition(nil), svc.Status.Conditions...),
 	}
 	return result
 }
@@ -589,6 +593,8 @@ func (l4 *L4) EnsureInternalLoadBalancer(nodeNames []string, svc *corev1.Service
 		return result
 	}
 	result.Annotations[annotations.BackendServiceKey] = bsName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewBackendServiceCondition(bsName))
+
 	if bs.LogConfig != nil {
 		result.MetricsState.LoggingEnabled = bs.LogConfig.Enable
 	}
@@ -643,17 +649,22 @@ func (l4 *L4) provideDualStackHealthChecks(nodeNames []string, result *L4ILBSync
 
 	if hcResult.HCFirewallRuleName != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckKey)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.FirewallHealthCheckConditionType)
 	}
 
 	if hcResult.HCFirewallRuleIPv6Name != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckIPv6Key] = hcResult.HCFirewallRuleIPv6Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckIPv6Condition(hcResult.HCFirewallRuleIPv6Name))
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckIPv6Key)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.FirewallHealthCheckIPv6ConditionType)
 	}
 
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	return hcResult.HCLink
 }
 
@@ -668,7 +679,9 @@ func (l4 *L4) provideIPv4HealthChecks(nodeNames []string, result *L4ILBSyncResul
 		return ""
 	}
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
 	return hcResult.HCLink
 }
 
@@ -701,10 +714,19 @@ func (l4 *L4) ensureIPv4Resources(result *L4ILBSyncResult, nodeNames []string, o
 	switch fr.IPProtocol {
 	case forwardingrules.ProtocolTCP:
 		result.Annotations[annotations.TCPForwardingRuleKey] = fr.Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewTCPForwardingRuleCondition(fr.Name))
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.UDPForwardingRuleConditionType)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.L3ForwardingRuleConditionType)
 	case forwardingrules.ProtocolUDP:
 		result.Annotations[annotations.UDPForwardingRuleKey] = fr.Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewUDPForwardingRuleCondition(fr.Name))
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.TCPForwardingRuleConditionType)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.L3ForwardingRuleConditionType)
 	case forwardingrules.ProtocolL3:
 		result.Annotations[annotations.L3ForwardingRuleKey] = fr.Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewL3ForwardingRuleCondition(fr.Name))
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.TCPForwardingRuleConditionType)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.UDPForwardingRuleConditionType)
 	}
 
 	l4.ensureIPv4NodesFirewall(nodeNames, fr.IPAddress, result)
@@ -771,6 +793,7 @@ func (l4 *L4) ensureIPv4NodesFirewall(nodeNames []string, ipAddress string, resu
 		return
 	}
 	result.Annotations[annotations.FirewallRuleKey] = firewallName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallCondition(firewallName))
 }
 
 func (l4 *L4) getServiceSubnetworkURL(options gce.ILBOptions) (string, error) {
@@ -798,6 +821,15 @@ func (l4 *L4) getSubnetworkURLByName(subnetName string) (string, error) {
 func (l4 *L4) hasAnnotation(annotationKey string) bool {
 	if _, ok := l4.Service.Annotations[annotationKey]; ok {
 		return true
+	}
+	return false
+}
+
+func (l4 *L4) hasCondition(conditionType string) bool {
+	for _, condition := range l4.Service.Status.Conditions {
+		if condition.Type == conditionType && len(condition.Message) > 0 {
+			return true
+		}
 	}
 	return false
 }

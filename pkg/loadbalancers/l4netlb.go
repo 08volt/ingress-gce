@@ -24,6 +24,8 @@ import (
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	compute "google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
+	metaapi "k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -91,6 +93,7 @@ type L4NetLBSyncResult struct {
 	Error              error
 	GCEResourceInError string
 	Status             *corev1.LoadBalancerStatus
+	Conditions         []metav1.Condition
 	MetricsLegacyState metrics.L4NetLBServiceLegacyState
 	MetricsState       metrics.L4ServiceState
 	SyncType           string
@@ -114,6 +117,7 @@ func NewL4SyncResult(syncType string, svc *corev1.Service, isMultinet bool, enab
 		SyncType:           syncType,
 		MetricsLegacyState: metrics.InitL4NetLBServiceLegacyState(&startTime),
 		MetricsState:       metrics.InitServiceMetricsState(svc, &startTime, isMultinet, enabledStrongSessionAffinity, isWeightedLBPodsPerNode, isLBWithZonalAffinity, backendType),
+		Conditions:         append([]metav1.Condition(nil), svc.Status.Conditions...),
 	}
 	return result
 }
@@ -315,16 +319,21 @@ func (l4netlb *L4NetLB) provideDualStackHealthChecks(nodeNames []string, result 
 
 	if hcResult.HCFirewallRuleName != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckKey)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.FirewallHealthCheckConditionType)
 	}
 
 	if hcResult.HCFirewallRuleIPv6Name != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckIPv6Key] = hcResult.HCFirewallRuleIPv6Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckIPv6Condition(hcResult.HCFirewallRuleIPv6Name))
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckIPv6Key)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.FirewallHealthCheckIPv6ConditionType)
 	}
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	return hcResult.HCLink
 }
 
@@ -339,7 +348,9 @@ func (l4netlb *L4NetLB) provideIPv4HealthChecks(nodeNames []string, result *L4Ne
 		return ""
 	}
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
 	return hcResult.HCLink
 }
 
@@ -414,10 +425,11 @@ func (l4netlb *L4NetLB) provideBackendService(syncResult *L4NetLBSyncResult, hcL
 	}
 
 	syncResult.Annotations[annotations.BackendServiceKey] = bsName
+	metaapi.SetStatusCondition(&syncResult.Conditions, utils.NewBackendServiceCondition(bsName))
+
 	if bs.LogConfig != nil {
 		syncResult.MetricsState.LoggingEnabled = bs.LogConfig.Enable
 	}
-
 	return bs.SelfLink
 }
 
@@ -454,8 +466,12 @@ func (l4netlb *L4NetLB) ensureIPv4Resources(result *L4NetLBSyncResult, nodeNames
 	}
 	if fr.IPProtocol == string(corev1.ProtocolTCP) {
 		result.Annotations[annotations.TCPForwardingRuleKey] = fr.Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewTCPForwardingRuleCondition(fr.Name))
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.UDPForwardingRuleConditionType)
 	} else {
 		result.Annotations[annotations.UDPForwardingRuleKey] = fr.Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewUDPForwardingRuleCondition(fr.Name))
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.TCPForwardingRuleConditionType)
 	}
 	result.MetricsLegacyState.IsManagedIP = ipAddrType == address.IPAddrManaged
 	result.MetricsLegacyState.IsPremiumTier = fr.NetworkTier == cloud.NetworkTierPremium.ToGCEValue()
@@ -484,6 +500,7 @@ func (l4netlb *L4NetLB) ensureIPv4MixedResources(result *L4NetLBSyncResult, node
 	var ipAddr string
 	if res.UDPFwdRule != nil {
 		result.Annotations[annotations.UDPForwardingRuleKey] = res.UDPFwdRule.Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewUDPForwardingRuleCondition(res.UDPFwdRule.Name))
 		if res.TCPFwdRule.NetworkTier == cloud.NetworkTierPremium.ToGCEValue() {
 			result.MetricsLegacyState.IsPremiumTier = true
 		}
@@ -491,6 +508,7 @@ func (l4netlb *L4NetLB) ensureIPv4MixedResources(result *L4NetLBSyncResult, node
 	}
 	if res.TCPFwdRule != nil {
 		result.Annotations[annotations.TCPForwardingRuleKey] = res.TCPFwdRule.Name
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewTCPForwardingRuleCondition(res.TCPFwdRule.Name))
 		if res.TCPFwdRule.NetworkTier == cloud.NetworkTierPremium.ToGCEValue() {
 			result.MetricsLegacyState.IsPremiumTier = true
 		}
@@ -560,6 +578,7 @@ func (l4netlb *L4NetLB) ensureIPv4NodesFirewall(nodeNames []string, ipAddress st
 		return
 	}
 	result.Annotations[annotations.FirewallRuleKey] = firewallName
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallCondition(firewallName))
 }
 
 // EnsureLoadBalancerDeleted performs a cleanup of all GCE resources for the given loadbalancer service.
