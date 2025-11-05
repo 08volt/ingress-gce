@@ -100,13 +100,21 @@ func deleteAnnotation(ctx *context.ControllerContext, svc *v1.Service, annotatio
 }
 
 // updateServiceStatus this faction checks if LoadBalancer status changed and patch service if needed.
-func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, svcLogger klog.Logger) error {
-	svcLogger.V(2).Info("Updating service status", "newStatus", fmt.Sprintf("%+v", newStatus))
-	if helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus) {
-		svcLogger.V(2).Info("New and old statuses are equal, skipping patch")
-		return nil
+func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newStatus *v1.LoadBalancerStatus, newConditions []metav1.Condition, svcLogger klog.Logger) error {
+	svcLogger.V(2).Info("Updating service status and conditions", "newStatus", fmt.Sprintf("%+v", newStatus), "newConditions", fmt.Sprintf("%+v", newConditions))
+
+	lbStatusEqual := helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus)
+	lbConditionsEqual := conditionsEqual(svc.Status.Conditions, newConditions)
+
+	if !lbStatusEqual || !lbConditionsEqual {
+		svcLogger.V(2).Info("Patching LoadBalancer status and Conditions", "newStatus", fmt.Sprintf("%+v", newStatus), "newConditions", fmt.Sprintf("%+v", newConditions))
+		return patch.PatchServiceStatus(ctx.KubeClient.CoreV1(), svc, v1.ServiceStatus{
+			LoadBalancer: *newStatus,
+			Conditions:   newConditions,
+		})
 	}
-	return patch.PatchServiceLoadBalancerStatus(ctx.KubeClient.CoreV1(), svc, *newStatus)
+	svcLogger.V(3).Info("Service status not changed, skipping patch for service")
+	return nil
 }
 
 // isHealthCheckDeleted checks if given health check exists in GCE
@@ -154,4 +162,25 @@ func finalizerWasRemovedUnexpectedly(oldService, newService *v1.Service, finaliz
 	// If the service was added for deletion, we don't need finalizers
 	svcToBeDeleted := newService.ObjectMeta.DeletionTimestamp != nil
 	return oldSvcHasLegacyFinalizer && !newSvcHasLegacyFinalizer && !svcToBeDeleted
+}
+
+// conditionsEqual checks if load balancer conditions are equal
+func conditionsEqual(l, r []metav1.Condition) bool {
+	if len(l) != len(r) {
+		return false
+	}
+	lMap := make(map[string]metav1.Condition)
+	for _, cond := range l {
+		lMap[cond.Type] = cond
+	}
+	for _, condR := range r {
+		condL, found := lMap[condR.Type]
+		if !found {
+			return false
+		}
+		if condL.Status != condR.Status || condL.Reason != condR.Reason || condL.Message != condR.Message {
+			return false
+		}
+	}
+	return true
 }
