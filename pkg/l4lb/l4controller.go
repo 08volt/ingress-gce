@@ -390,11 +390,11 @@ func (l4c *L4Controller) processServiceCreateOrUpdate(service *v1.Service, svcLo
 		syncResult.Error = err
 		return syncResult
 	}
-	newConditions := []metav1.Condition{}
+	expectedConditions := []metav1.Condition{}
 	if l4c.ctx.EnableL4LBConditions {
-		newConditions = syncResult.Conditions
+		expectedConditions = syncResult.Conditions
 	}
-	err = updateServiceStatus(l4c.ctx, service, syncResult.Status, newConditions, svcLogger)
+	err = updateServiceStatus(l4c.ctx, service, syncResult.Status, expectedConditions, svcLogger)
 	if err != nil {
 		l4c.ctx.Recorder(service.Namespace).Eventf(service, v1.EventTypeWarning, "SyncLoadBalancerFailed",
 			"Error updating load balancer status: %v", err)

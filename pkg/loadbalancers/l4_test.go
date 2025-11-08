@@ -28,6 +28,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/api/compute/v1"
 	ga "google.golang.org/api/compute/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/ingress-gce/pkg/annotations"
 	"k8s.io/ingress-gce/pkg/backends"
 	"k8s.io/ingress-gce/pkg/firewalls"
@@ -245,7 +246,7 @@ func TestEnsureInternalLoadBalancer(t *testing.T) {
 			if len(result.Status.Ingress) == 0 {
 				t.Errorf("Got empty loadBalancer status using handler %v", l4)
 			}
-			assertILBResources(t, l4, nodeNames, result.Annotations)
+			assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 
 			backendServiceName := l4.namer.L4Backend(l4.Service.Namespace, l4.Service.Name)
 			key := meta.RegionalKey(backendServiceName, l4.cloud.Region())
@@ -270,7 +271,7 @@ func TestEnsureInternalLoadBalancer(t *testing.T) {
 			if len(result.Status.Ingress) == 0 {
 				t.Errorf("Got empty loadBalancer status using handler %v", l4)
 			}
-			assertILBResources(t, l4, nodeNames, result.Annotations)
+			assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 			bs, err = composite.GetBackendService(l4.cloud, meta.RegionalKey(backendServiceName, l4.cloud.Region()), meta.VersionGA, klog.TODO())
 			if err != nil {
 				t.Errorf("Failed to lookup backend service, err %v", err)
@@ -311,7 +312,7 @@ func TestEnsureInternalLoadBalancerTypeChange(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 
 	// Now add the latest annotation and change scheme to external
 	svc.Annotations[gce.ServiceAnnotationLoadBalancerType] = ""
@@ -377,7 +378,7 @@ func TestEnsureInternalLoadBalancerWithExistingResources(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 }
 
 // TestEnsureInternalLoadBalancerClearPreviousResources creates ILB resources with incomplete configuration and verifies
@@ -579,7 +580,7 @@ func TestUpdateResourceLinks(t *testing.T) {
 		t.Errorf("Failed to ensure loadBalancer %s, err %v", lbName, result.Error)
 	}
 	// verifies that the right healthcheck is present
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 
 	// ensure that the other healthchecks still exist.
 	key.Name = "hc1"
@@ -680,7 +681,7 @@ func TestEnsureInternalLoadBalancerDeleted(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 
 	// Delete the loadbalancer.
 	result = l4.EnsureInternalLoadBalancerDeleted(svc)
@@ -720,7 +721,7 @@ func TestEnsureInternalLoadBalancerDeletedTwiceDoesNotError(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 
 	// Delete the loadbalancer
 	result = l4.EnsureInternalLoadBalancerDeleted(svc)
@@ -801,6 +802,7 @@ func TestHealthCheckFirewallDeletionWithNetLB(t *testing.T) {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4NetLB)
 	}
 	l4NetLB.Service.Annotations = xlbResult.Annotations
+	l4NetLB.Service.Status.Conditions = xlbResult.Conditions
 	assertNetLBResources(t, l4NetLB, nodeNames)
 
 	// Delete the ILB loadbalancer
@@ -851,7 +853,7 @@ func ensureService(fakeGCE *gce.Cloud, namer *namer_util.L4Namer, nodeNames []st
 		result.Error = fmt.Errorf("Got empty loadBalancer status using handler %v", l4)
 		return nil, nil, result
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	return svc, l4, nil
 }
 
@@ -889,7 +891,7 @@ func TestEnsureInternalLoadBalancerWithSpecialHealthCheck(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 
 	lbName := l4.namer.L4Backend(svc.Namespace, svc.Name)
 	key, err := composite.CreateKey(l4.cloud, lbName, meta.Global)
@@ -1088,7 +1090,7 @@ func TestEnsureInternalLoadBalancerEnableGlobalAccess(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 
 	// Change service to include the global access annotation
 	svc.Annotations[gce.ServiceAnnotationILBAllowGlobalAccess] = "true"
@@ -1099,7 +1101,7 @@ func TestEnsureInternalLoadBalancerEnableGlobalAccess(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	descString, err := utils.MakeL4LBServiceDescription(utils.ServiceKeyFunc(svc.Namespace, svc.Name), "1.2.3.0", meta.VersionGA, false, utils.ILB)
 	if err != nil {
 		t.Errorf("Unexpected error when creating description - %v", err)
@@ -1139,7 +1141,7 @@ func TestEnsureInternalLoadBalancerEnableGlobalAccess(t *testing.T) {
 	if fwdRule.Description != descString {
 		t.Errorf("Expected description %s, Got %s", descString, fwdRule.Description)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	// Delete the service
 	result = l4.EnsureInternalLoadBalancerDeleted(svc)
 	if result.Error != nil {
@@ -1177,7 +1179,7 @@ func TestEnsureInternalLoadBalancerCustomSubnet(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, l4.cloud.SubnetworkURL())
+	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, result.Conditions, l4.cloud.SubnetworkURL())
 
 	frName := l4.GetFRName()
 	fwdRule, err := composite.GetForwardingRule(l4.cloud, meta.RegionalKey(frName, l4.cloud.Region()), meta.VersionGA, klog.TODO())
@@ -1213,7 +1215,7 @@ func TestEnsureInternalLoadBalancerCustomSubnet(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, subnetNames[0])
+	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, result.Conditions, subnetNames[0])
 	if result.Status.Ingress[0].IP != requestedIP {
 		t.Fatalf("Reserved IP %s not propagated, Got '%s'", requestedIP, result.Status.Ingress[0].IP)
 	}
@@ -1227,7 +1229,7 @@ func TestEnsureInternalLoadBalancerCustomSubnet(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, subnetNames[1])
+	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, result.Conditions, subnetNames[1])
 	if result.Status.Ingress[0].IP != requestedIP {
 		t.Errorf("Reserved IP %s not propagated, Got %s", requestedIP, result.Status.Ingress[0].IP)
 	}
@@ -1241,7 +1243,7 @@ func TestEnsureInternalLoadBalancerCustomSubnet(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, subnetNames[2])
+	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, result.Conditions, subnetNames[2])
 	if result.Status.Ingress[0].IP != requestedIP {
 		t.Errorf("Reserved IP %s not propagated, Got %s", requestedIP, result.Status.Ingress[0].IP)
 	}
@@ -1253,7 +1255,7 @@ func TestEnsureInternalLoadBalancerCustomSubnet(t *testing.T) {
 	if result.Error != nil {
 		t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 	}
-	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, l4.cloud.SubnetworkURL())
+	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, result.Annotations, result.Conditions, l4.cloud.SubnetworkURL())
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
@@ -1533,7 +1535,7 @@ func TestEnsureInternalLoadBalancerModifyProtocol(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	key, err := composite.CreateKey(l4.cloud, frName, meta.Regional)
 	if err != nil {
 		t.Errorf("Unexpected error when creating key - %v", err)
@@ -1554,7 +1556,7 @@ func TestEnsureInternalLoadBalancerModifyProtocol(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	// Make sure the old forwarding rule is deleted
 	fwdRule, err = composite.GetForwardingRule(l4.cloud, key, meta.VersionGA, klog.TODO())
 	if !utils.IsNotFoundError(err) {
@@ -1674,6 +1676,7 @@ func TestDualStackInternalLoadBalancerModifyProtocol(t *testing.T) {
 				t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 			}
 			l4.Service.Annotations = result.Annotations
+			l4.Service.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			// Change Protocol and trigger sync
@@ -1683,6 +1686,7 @@ func TestDualStackInternalLoadBalancerModifyProtocol(t *testing.T) {
 				t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 			}
 			l4.Service.Annotations = result.Annotations
+			l4.Service.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			c.MockForwardingRules.DeleteHook = nil
@@ -1735,6 +1739,7 @@ func TestDualStackInternalLoadBalancerModifyPorts(t *testing.T) {
 				t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 			}
 			l4.Service.Annotations = result.Annotations
+			l4.Service.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			// Change Protocol and trigger sync
@@ -1744,6 +1749,7 @@ func TestDualStackInternalLoadBalancerModifyPorts(t *testing.T) {
 				t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 			}
 			l4.Service.Annotations = result.Annotations
+			l4.Service.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			l4.EnsureInternalLoadBalancerDeleted(l4.Service)
@@ -1782,7 +1788,7 @@ func TestEnsureInternalLoadBalancerAllPorts(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	frName := l4.getFRNameWithProtocol("TCP")
 	key, err := composite.CreateKey(l4.cloud, frName, meta.Regional)
 	if err != nil {
@@ -1811,7 +1817,7 @@ func TestEnsureInternalLoadBalancerAllPorts(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	fwdRule, err = composite.GetForwardingRule(l4.cloud, key, meta.VersionGA, klog.TODO())
 	if err != nil {
 		t.Errorf("Unexpected error when looking up forwarding rule - %v", err)
@@ -1837,7 +1843,7 @@ func TestEnsureInternalLoadBalancerAllPorts(t *testing.T) {
 	if len(result.Status.Ingress) == 0 {
 		t.Errorf("Got empty loadBalancer status using handler %v", l4)
 	}
-	assertILBResources(t, l4, nodeNames, result.Annotations)
+	assertILBResources(t, l4, nodeNames, result.Annotations, result.Conditions)
 	fwdRule, err = composite.GetForwardingRule(l4.cloud, key, meta.VersionGA, klog.TODO())
 	if err != nil {
 		t.Errorf("Unexpected error when looking up forwarding rule - %v", err)
@@ -1869,6 +1875,7 @@ func TestIPv6OnlyEnsureInternalLoadBalancerAllPorts(t *testing.T) {
 		t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 	}
 	l4.Service.Annotations = result.Annotations
+	l4.Service.Status.Conditions = result.Conditions
 	assertDualStackILBResources(t, l4, nodeNames)
 
 	// Verify initial port on IPv6 FR
@@ -1899,6 +1906,7 @@ func TestIPv6OnlyEnsureInternalLoadBalancerAllPorts(t *testing.T) {
 		t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 	}
 	l4.Service.Annotations = result.Annotations
+	l4.Service.Status.Conditions = result.Conditions
 	assertDualStackILBResources(t, l4, nodeNames)
 
 	fwdRule, err = composite.GetForwardingRule(l4.cloud, frKey, meta.VersionGA, klog.TODO())
@@ -1925,6 +1933,7 @@ func TestIPv6OnlyEnsureInternalLoadBalancerAllPorts(t *testing.T) {
 		t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 	}
 	l4.Service.Annotations = result.Annotations
+	l4.Service.Status.Conditions = result.Conditions
 	assertDualStackILBResources(t, l4, nodeNames)
 
 	fwdRule, err = composite.GetForwardingRule(l4.cloud, frKey, meta.VersionGA, klog.TODO())
@@ -1998,6 +2007,7 @@ func TestEnsureInternalDualStackLoadBalancer(t *testing.T) {
 				t.Errorf("Got empty loadBalancer status using handler %v", l4)
 			}
 			l4.Service.Annotations = result.Annotations
+			l4.Service.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			l4.EnsureInternalLoadBalancerDeleted(l4.Service)
@@ -2178,14 +2188,17 @@ func TestDualStackILBTransitions(t *testing.T) {
 
 			result := l4.EnsureInternalLoadBalancer(nodeNames, svc)
 			svc.Annotations = result.Annotations
+			svc.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			finalSvc := test.NewL4ILBDualStackService(8080, tc.finalProtocol, tc.finalIPFamily, tc.finalTrafficPolicy)
 			finalSvc.Annotations = svc.Annotations
+			finalSvc.Status.Conditions = svc.Status.Conditions
 			l4.Service = finalSvc
 
 			result = l4.EnsureInternalLoadBalancer(nodeNames, svc)
 			finalSvc.Annotations = result.Annotations
+			finalSvc.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			l4.EnsureInternalLoadBalancerDeleted(l4.Service)
@@ -2224,6 +2237,7 @@ func TestDualStackILBSyncIgnoresNoAnnotationIPv6Resources(t *testing.T) {
 	svc.Spec.IPFamilies = []v1.IPFamily{v1.IPv4Protocol, v1.IPv6Protocol}
 	result := l4.EnsureInternalLoadBalancer(nodeNames, svc)
 	svc.Annotations = result.Annotations
+	svc.Status.Conditions = result.Conditions
 	assertDualStackILBResources(t, l4, nodeNames)
 
 	// Delete resources annotation
@@ -2236,6 +2250,7 @@ func TestDualStackILBSyncIgnoresNoAnnotationIPv6Resources(t *testing.T) {
 	// Run new sync. Controller should not delete resources, if they don't exist in annotation
 	result = l4.EnsureInternalLoadBalancer(nodeNames, svc)
 	svc.Annotations = result.Annotations
+	svc.Status.Conditions = result.Conditions
 
 	ipv6FWName := l4.namer.L4IPv6Firewall(l4.Service.Namespace, l4.Service.Name)
 	err := verifyFirewallNotExists(l4.cloud, ipv6FWName)
@@ -2265,6 +2280,7 @@ func TestDualStackILBSyncIgnoresNoAnnotationIPv4Resources(t *testing.T) {
 	svc.Spec.IPFamilies = []v1.IPFamily{v1.IPv6Protocol, v1.IPv4Protocol}
 	result := l4.EnsureInternalLoadBalancer(nodeNames, svc)
 	svc.Annotations = result.Annotations
+	svc.Status.Conditions = result.Conditions
 	assertDualStackILBResources(t, l4, nodeNames)
 
 	// Delete resources annotation
@@ -2277,6 +2293,7 @@ func TestDualStackILBSyncIgnoresNoAnnotationIPv4Resources(t *testing.T) {
 	// Run new sync. Controller should not delete resources, if they don't exist in annotation
 	result = l4.EnsureInternalLoadBalancer(nodeNames, svc)
 	svc.Annotations = result.Annotations
+	svc.Status.Conditions = result.Conditions
 
 	// Verify IPv6 Firewall was not deleted
 	backendServiceName := l4.namer.L4Backend(l4.Service.Namespace, l4.Service.Name)
@@ -2360,6 +2377,7 @@ func TestDualStackILBStaticIPAnnotation(t *testing.T) {
 				t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 			}
 			svc.Annotations = result.Annotations
+			svc.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			var gotIPs []string
@@ -2453,6 +2471,7 @@ func TestIPv6OnlyILBStaticIPAnnotation(t *testing.T) {
 				t.Errorf("Failed to ensure loadBalancer, err %v", result.Error)
 			}
 			svc.Annotations = result.Annotations
+			svc.Status.Conditions = result.Conditions
 			assertDualStackILBResources(t, l4, nodeNames)
 
 			var gotIPs []string
@@ -2786,12 +2805,12 @@ func mustSetupILBTestHandler(t *testing.T, svc *v1.Service, nodeNames []string) 
 	return l4
 }
 
-func assertILBResources(t *testing.T, l4 *L4, nodeNames []string, resourceAnnotations map[string]string) {
+func assertILBResources(t *testing.T, l4 *L4, nodeNames []string, resourceAnnotations map[string]string, resourceConditions []metav1.Condition) {
 	t.Helper()
-	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, resourceAnnotations, l4.cloud.SubnetworkURL())
+	assertILBResourcesWithCustomSubnet(t, l4, nodeNames, resourceAnnotations, resourceConditions, l4.cloud.SubnetworkURL())
 }
 
-func assertILBResourcesWithCustomSubnet(t *testing.T, l4 *L4, nodeNames []string, resourceAnnotations map[string]string, expectedSubnet string) {
+func assertILBResourcesWithCustomSubnet(t *testing.T, l4 *L4, nodeNames []string, resourceAnnotations map[string]string, resourceConditions []metav1.Condition, expectedSubnet string) {
 	t.Helper()
 
 	err := verifyILBIPv4NodesFirewall(l4, nodeNames)
@@ -2823,6 +2842,10 @@ func assertILBResourcesWithCustomSubnet(t *testing.T, l4 *L4, nodeNames []string
 	if !reflect.DeepEqual(expectedAnnotations, resourceAnnotations) {
 		t.Fatalf("Expected annotations %v, got %v", expectedAnnotations, resourceAnnotations)
 	}
+
+	expectedConditions := buildExpectedConditions(l4)
+	assertConditionsMatch(t, expectedConditions, resourceConditions)
+
 }
 
 func assertDualStackILBResources(t *testing.T, l4 *L4, nodeNames []string) {
@@ -2892,6 +2915,9 @@ func assertDualStackILBResourcesWithCustomSubnet(t *testing.T, l4 *L4, nodeNames
 		diff := cmp.Diff(expectedAnnotations, l4.Service.Annotations)
 		t.Errorf("Expected annotations %v, got %v, diff %v", expectedAnnotations, l4.Service.Annotations, diff)
 	}
+
+	expectedConditions := buildExpectedConditions(l4)
+	assertConditionsMatch(t, expectedConditions, l4.Service.Status.Conditions)
 }
 
 func buildExpectedAnnotations(l4 *L4) map[string]string {
@@ -2934,6 +2960,28 @@ func buildExpectedAnnotations(l4 *L4) map[string]string {
 		}
 	}
 	return expectedAnnotations
+}
+
+func buildExpectedConditions(l4 *L4) []conditionMatcher {
+	isSharedHC := !servicehelper.RequestsOnlyLocalTraffic(l4.Service)
+	proto := string(utils.GetProtocol(l4.Service.Spec.Ports))
+	backendName := l4.namer.L4Backend(l4.Service.Namespace, l4.Service.Name)
+	hcName := l4.namer.L4HealthCheck(l4.Service.Namespace, l4.Service.Name, isSharedHC)
+	ipv4FrName := l4.GetFRName()
+	ipv4FwName := backendName
+	hcFwName := l4.namer.L4HealthCheckFirewall(l4.Service.Namespace, l4.Service.Name, isSharedHC)
+	ipv6FrName := l4.getIPv6FRName()
+	ipv6FwName := l4.namer.L4IPv6Firewall(l4.Service.Namespace, l4.Service.Name)
+	hcFwIPv6Name := l4.namer.L4IPv6HealthCheckFirewall(l4.Service.Namespace, l4.Service.Name, isSharedHC)
+
+	if utils.NeedsIPv4(l4.Service) && utils.NeedsIPv6(l4.Service) {
+		return expectedL4LBDualStackConditions(proto, backendName, ipv4FrName, ipv6FrName, hcName, ipv4FwName, ipv6FwName, hcFwName, hcFwIPv6Name)
+	} else if utils.NeedsIPv4(l4.Service) {
+		return expectedL4LBIPv4Conditions(proto, backendName, ipv4FrName, hcName, ipv4FwName, hcFwName)
+	} else if utils.NeedsIPv6(l4.Service) {
+		return expectedL4LBIPv6Conditions(proto, backendName, ipv6FrName, hcName, ipv6FwName, hcFwIPv6Name)
+	}
+	return []conditionMatcher{}
 }
 
 func getAndVerifyILBHealthCheck(l4 *L4) (*composite.HealthCheck, error) {

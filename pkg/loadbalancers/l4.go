@@ -815,6 +815,15 @@ func (l4 *L4) hasAnnotation(annotationKey string) bool {
 	return false
 }
 
+func (l4 *L4) hasCondition(conditionType string) bool {
+	for _, condition := range l4.Service.Status.Conditions {
+		if condition.Type == conditionType && len(condition.Message) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // getOldIPv4ForwardingRule returns old IPv4 forwarding rule, with checking backend service protocol, if it exists.
 // This is useful when switching protocols of the service,
 // because forwarding rule name depends on the protocol, and we need to get forwarding rule from the old protocol name.

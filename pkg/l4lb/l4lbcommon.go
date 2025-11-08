@@ -107,10 +107,21 @@ func updateServiceStatus(ctx *context.ControllerContext, svc *v1.Service, newSta
 	copy(expectedConditions, svc.Status.Conditions)
 
 	changedConditions := false
+	newConditionTypes := make(map[string]bool)
 
 	for _, newCondition := range newConditions {
 		svcLogger.V(3).Info("New condition to be set", "condition", fmt.Sprintf("%+v", newCondition))
 		changedConditions = metaapi.SetStatusCondition(&expectedConditions, newCondition) || changedConditions
+		newConditionTypes[newCondition.Type] = true
+	}
+
+	// Set conditions to Removed if they exist in service but not in newConditions
+	for i := range expectedConditions {
+		if !newConditionTypes[expectedConditions[i].Type] && expectedConditions[i].Status == metav1.ConditionTrue {
+			svcLogger.V(3).Info("Setting condition to Removed", "conditionType", expectedConditions[i].Type)
+			utils.SetRemovedResourceCondition(&expectedConditions[i])
+			changedConditions = true
+		}
 	}
 
 	lbStatusEqual := helpers.LoadBalancerStatusEqual(&svc.Status.LoadBalancer, newStatus)

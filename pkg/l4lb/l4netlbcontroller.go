@@ -685,12 +685,12 @@ func (lc *L4NetLBController) syncInternal(service *v1.Service, svcLogger klog.Lo
 		return syncResult
 	}
 
-	newConditions := []metav1.Condition{}
+	expectedConditions := []metav1.Condition{}
 	if lc.ctx.EnableL4LBConditions {
-		newConditions = syncResult.Conditions
+		expectedConditions = syncResult.Conditions
 	}
 
-	err = updateServiceStatus(lc.ctx, service, syncResult.Status, newConditions, svcLogger)
+	err = updateServiceStatus(lc.ctx, service, syncResult.Status, expectedConditions, svcLogger)
 	if err != nil {
 		lc.ctx.Recorder(service.Namespace).Eventf(service, v1.EventTypeWarning, "SyncExternalLoadBalancerFailed",
 			"Error updating L4 External LoadBalancer, err: %v", err)

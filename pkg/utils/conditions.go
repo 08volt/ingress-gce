@@ -5,30 +5,39 @@ import (
 )
 
 const (
-	L4LBBackendServiceConditionType          = "ServiceLoadBalancerBackendService"
-	L4LBTCPForwardingRuleConditionType       = "ServiceLoadBalancerTCPForwardingRule"
-	L4LBUDPForwardingRuleConditionType       = "ServiceLoadBalancerUDPForwardingRule"
-	L4LBL3ForwardingRuleConditionType        = "ServiceLoadBalancerL3ForwardingRule"
-	L4LBTCPIPv6ForwardingRuleConditionType   = "ServiceLoadBalancerTCPIPv6ForwardingRule"
-	L4LBUDPIPv6ForwardingRuleConditionType   = "ServiceLoadBalancerUDPIPv6ForwardingRule"
-	L4LBL3IPv6ForwardingRuleConditionType    = "ServiceLoadBalancerL3IPv6ForwardingRule"
-	L4LBHealthCheckConditionType             = "ServiceLoadBalancerHealthCheck"
-	L4LBFirewallConditionType                = "ServiceLoadBalancerFirewall"
-	L4LBIPv6FirewallConditionType            = "ServiceLoadBalancerIPv6Firewall"
-	L4LBFirewallHealthCheckConditionType     = "ServiceLoadBalancerFirewallHealthCheck"
-	L4LBFirewallHealthCheckIPv6ConditionType = "ServiceLoadBalancerFirewallHealthCheckIPv6"
-	L4LBNetworkEndpointGroupConditionType    = "ServiceLoadBalancerNetworkEndpointGroup"
+	BackendServiceConditionType          = "ServiceLoadBalancerBackendService"
+	TCPForwardingRuleConditionType       = "ServiceLoadBalancerTCPForwardingRule"
+	UDPForwardingRuleConditionType       = "ServiceLoadBalancerUDPForwardingRule"
+	L3ForwardingRuleConditionType        = "ServiceLoadBalancerL3ForwardingRule"
+	TCPIPv6ForwardingRuleConditionType   = "ServiceLoadBalancerTCPIPv6ForwardingRule"
+	UDPIPv6ForwardingRuleConditionType   = "ServiceLoadBalancerUDPIPv6ForwardingRule"
+	L3IPv6ForwardingRuleConditionType    = "ServiceLoadBalancerL3IPv6ForwardingRule"
+	HealthCheckConditionType             = "ServiceLoadBalancerHealthCheck"
+	FirewallConditionType                = "ServiceLoadBalancerFirewall"
+	IPv6FirewallConditionType            = "ServiceLoadBalancerIPv6Firewall"
+	FirewallHealthCheckConditionType     = "ServiceLoadBalancerFirewallHealthCheck"
+	FirewallHealthCheckIPv6ConditionType = "ServiceLoadBalancerFirewallHealthCheckIPv6"
 
-	L4LBConditionReason = "GCEResourceAllocated"
+	ConditionReason        = "GCEResourceAllocated"
+	ConditionReasonRemoved = "GCEResourceRemoved"
+
+	MessageResourceRemoved = "GCE resource has been removed"
 )
+
+func SetRemovedResourceCondition(cond *metav1.Condition) {
+	cond.LastTransitionTime = metav1.Now()
+	cond.Status = metav1.ConditionFalse
+	cond.Reason = ConditionReasonRemoved
+	cond.Message = MessageResourceRemoved
+}
 
 // NewBackendServiceCondition creates a condition for the backend service.
 func NewBackendServiceCondition(bsName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBBackendServiceConditionType,
+		Type:               BackendServiceConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            bsName,
 	}
 }
@@ -37,9 +46,9 @@ func NewBackendServiceCondition(bsName string) metav1.Condition {
 func NewTCPForwardingRuleCondition(frName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBTCPForwardingRuleConditionType,
+		Type:               TCPForwardingRuleConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            frName,
 	}
 }
@@ -48,9 +57,9 @@ func NewTCPForwardingRuleCondition(frName string) metav1.Condition {
 func NewUDPForwardingRuleCondition(frName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBUDPForwardingRuleConditionType,
+		Type:               UDPForwardingRuleConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            frName,
 	}
 }
@@ -59,9 +68,9 @@ func NewUDPForwardingRuleCondition(frName string) metav1.Condition {
 func NewL3ForwardingRuleCondition(frName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBL3ForwardingRuleConditionType,
+		Type:               L3ForwardingRuleConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            frName,
 	}
 }
@@ -70,9 +79,9 @@ func NewL3ForwardingRuleCondition(frName string) metav1.Condition {
 func NewTCPIPv6ForwardingRuleCondition(frName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBTCPIPv6ForwardingRuleConditionType,
+		Type:               TCPIPv6ForwardingRuleConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            frName,
 	}
 }
@@ -81,9 +90,9 @@ func NewTCPIPv6ForwardingRuleCondition(frName string) metav1.Condition {
 func NewUDPIPv6ForwardingRuleCondition(frName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBUDPIPv6ForwardingRuleConditionType,
+		Type:               UDPIPv6ForwardingRuleConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            frName,
 	}
 }
@@ -92,9 +101,9 @@ func NewUDPIPv6ForwardingRuleCondition(frName string) metav1.Condition {
 func NewL3IPv6ForwardingRuleCondition(frName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBL3IPv6ForwardingRuleConditionType,
+		Type:               L3IPv6ForwardingRuleConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            frName,
 	}
 }
@@ -103,9 +112,9 @@ func NewL3IPv6ForwardingRuleCondition(frName string) metav1.Condition {
 func NewHealthCheckCondition(hcName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBHealthCheckConditionType,
+		Type:               HealthCheckConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            hcName,
 	}
 }
@@ -114,9 +123,9 @@ func NewHealthCheckCondition(hcName string) metav1.Condition {
 func NewFirewallCondition(fwName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBFirewallConditionType,
+		Type:               FirewallConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            fwName,
 	}
 }
@@ -125,9 +134,9 @@ func NewFirewallCondition(fwName string) metav1.Condition {
 func NewIPv6FirewallCondition(fwName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBIPv6FirewallConditionType,
+		Type:               IPv6FirewallConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            fwName,
 	}
 }
@@ -136,9 +145,9 @@ func NewIPv6FirewallCondition(fwName string) metav1.Condition {
 func NewFirewallHealthCheckCondition(fwName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBFirewallHealthCheckConditionType,
+		Type:               FirewallHealthCheckConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            fwName,
 	}
 }
@@ -147,20 +156,20 @@ func NewFirewallHealthCheckCondition(fwName string) metav1.Condition {
 func NewFirewallHealthCheckIPv6Condition(fwName string) metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBFirewallHealthCheckIPv6ConditionType,
+		Type:               FirewallHealthCheckIPv6ConditionType,
 		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
+		Reason:             ConditionReason,
 		Message:            fwName,
 	}
 }
 
-// NewNetworkEndpointGroupCondition creates a condition for the network endpoint group.
-func NewNetworkEndpointGroupCondition(negName string) metav1.Condition {
+// NewFirewallHealthCheckIPv6ConditionRemoved creates a condition for the firewall health check IPv6.
+func NewFirewallHealthCheckIPv6ConditionRemoved() metav1.Condition {
 	return metav1.Condition{
 		LastTransitionTime: metav1.Now(),
-		Type:               L4LBNetworkEndpointGroupConditionType,
-		Status:             metav1.ConditionTrue,
-		Reason:             L4LBConditionReason,
-		Message:            negName,
+		Type:               FirewallHealthCheckIPv6ConditionType,
+		Status:             metav1.ConditionFalse,
+		Reason:             ConditionReasonRemoved,
+		Message:            MessageResourceRemoved,
 	}
 }
