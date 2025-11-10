@@ -82,13 +82,13 @@ const (
 	ServiceStatusPrefix = "service.kubernetes.io"
 	// TCPForwardingRuleKey is the annotation key used by l4 controller to record
 	// GCP TCP forwarding rule name.
-	TCPForwardingRuleKey = ServiceStatusPrefix + "/tcp-" + ForwardingRuleResource
+	TCPForwardingRuleKey = ServiceStatusPrefix + "/" + TCPForwardingRuleResource
 	// UDPForwardingRuleKey is the annotation key used by l4 controller to record
 	// GCP UDP forwarding rule name.
-	UDPForwardingRuleKey = ServiceStatusPrefix + "/udp-" + ForwardingRuleResource
+	UDPForwardingRuleKey = ServiceStatusPrefix + "/" + UDPForwardingRuleResource
 	// L3ForwardingRuleKey is the annotation key used by l4 controller to record
 	// GCP L3_DEFAULT forwarding rule name.
-	L3ForwardingRuleKey = ServiceStatusPrefix + "/l3-" + ForwardingRuleResource
+	L3ForwardingRuleKey = ServiceStatusPrefix + "/" + L3ForwardingRuleResource
 	// TCPForwardingRuleIPv6Key is the annotation key used by l4 controller to record
 	// GCP IPv6 TCP forwarding rule name.
 	TCPForwardingRuleIPv6Key = TCPForwardingRuleKey + IPv6Suffix
@@ -117,6 +117,12 @@ const (
 	// the firewall rule name that allows IPv6 healthcheck traffic.
 	FirewallRuleForHealthcheckIPv6Key  = FirewallRuleForHealthcheckKey + IPv6Suffix
 	ForwardingRuleResource             = "forwarding-rule"
+	TCPForwardingRuleResource          = "tcp-" + ForwardingRuleResource
+	UDPForwardingRuleResource          = "udp-" + ForwardingRuleResource
+	L3ForwardingRuleResource           = "l3-" + ForwardingRuleResource
+	TCPIPv6ForwardingRuleResource      = TCPForwardingRuleResource + IPv6Suffix
+	UDPIPv6ForwardingRuleResource      = UDPForwardingRuleResource + IPv6Suffix
+	L3IPv6ForwardingRuleResource       = L3ForwardingRuleResource + IPv6Suffix
 	ForwardingRuleIPv6Resource         = ForwardingRuleResource + IPv6Suffix
 	BackendServiceResource             = "backend-service"
 	FirewallRuleResource               = "firewall-rule"

@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	"google.golang.org/api/compute/v1"
 	corev1 "k8s.io/api/core/v1"
+	metaapi "k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/cache"
@@ -105,6 +106,7 @@ func NewL4ILBSyncResult(syncType string, startTime time.Time, svc *corev1.Servic
 		SyncType:    syncType,
 		// Internal Load Balancer doesn't support strong session affinity (passing `false` all along)
 		MetricsState: metrics.InitServiceMetricsState(svc, &startTime, isMultinetService, enabledStrongSessionAffinity, isWeightedLBPodsPerNode, isLBWithZonalAffinity, metrics.L4BackendTypeNEG),
+		Conditions:   append([]metav1.Condition(nil), svc.Status.Conditions...),
 	}
 	return result
 }
@@ -588,10 +590,11 @@ func (l4 *L4) EnsureInternalLoadBalancer(nodeNames []string, svc *corev1.Service
 			result.GCEResourceInError = annotations.BackendServiceResource
 			result.Error = err
 		}
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewConditionResourceAllocationFailed(utils.BackendServiceConditionType, err.Error()))
 		return result
 	}
 	result.Annotations[annotations.BackendServiceKey] = bsName
-	result.Conditions = append(result.Conditions, utils.NewBackendServiceCondition(bsName))
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewBackendServiceCondition(bsName))
 
 	if bs.LogConfig != nil {
 		result.MetricsState.LoggingEnabled = bs.LogConfig.Enable
@@ -642,25 +645,29 @@ func (l4 *L4) provideDualStackHealthChecks(nodeNames []string, result *L4ILBSync
 	if hcResult.Err != nil {
 		result.GCEResourceInError = hcResult.GceResourceInError
 		result.Error = hcResult.Err
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewConditionResourceAllocationFailedFromAnnotation(hcResult.GceResourceInError, hcResult.Err.Error()))
 		return ""
 	}
 
 	if hcResult.HCFirewallRuleName != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
-		result.Conditions = append(result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
+
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckKey)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.FirewallHealthCheckConditionType)
 	}
 
 	if hcResult.HCFirewallRuleIPv6Name != "" {
 		result.Annotations[annotations.FirewallRuleForHealthcheckIPv6Key] = hcResult.HCFirewallRuleIPv6Name
-		result.Conditions = append(result.Conditions, utils.NewFirewallHealthCheckIPv6Condition(hcResult.HCFirewallRuleIPv6Name))
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckIPv6Condition(hcResult.HCFirewallRuleIPv6Name))
 	} else {
 		delete(result.Annotations, annotations.FirewallRuleForHealthcheckIPv6Key)
+		metaapi.RemoveStatusCondition(&result.Conditions, utils.FirewallHealthCheckIPv6ConditionType)
 	}
 
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
-	result.Conditions = append(result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	return hcResult.HCLink
 }
 
@@ -672,12 +679,13 @@ func (l4 *L4) provideIPv4HealthChecks(nodeNames []string, result *L4ILBSyncResul
 	if hcResult.Err != nil {
 		result.GCEResourceInError = hcResult.GceResourceInError
 		result.Error = hcResult.Err
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewConditionResourceAllocationFailedFromAnnotation(hcResult.GceResourceInError, hcResult.Err.Error()))
 		return ""
 	}
 	result.Annotations[annotations.HealthcheckKey] = hcResult.HCName
-	result.Conditions = append(result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewHealthCheckCondition(hcResult.HCName))
 	result.Annotations[annotations.FirewallRuleForHealthcheckKey] = hcResult.HCFirewallRuleName
-	result.Conditions = append(result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallHealthCheckCondition(hcResult.HCFirewallRuleName))
 	return hcResult.HCLink
 }
 
@@ -704,19 +712,20 @@ func (l4 *L4) ensureIPv4Resources(result *L4ILBSyncResult, nodeNames []string, o
 		l4.svcLogger.Error(err, "ensureIPv4Resources: Failed to ensure forwarding rule for L4 ILB Service")
 		result.GCEResourceInError = annotations.ForwardingRuleResource
 		result.Error = err
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewConditionResourceAllocationFailed(utils.ForwardingRuleResourceConditionType, err.Error()))
 		return
 	}
 
 	switch fr.IPProtocol {
 	case forwardingrules.ProtocolTCP:
 		result.Annotations[annotations.TCPForwardingRuleKey] = fr.Name
-		result.Conditions = append(result.Conditions, utils.NewTCPForwardingRuleCondition(fr.Name))
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewTCPForwardingRuleCondition(fr.Name))
 	case forwardingrules.ProtocolUDP:
 		result.Annotations[annotations.UDPForwardingRuleKey] = fr.Name
-		result.Conditions = append(result.Conditions, utils.NewUDPForwardingRuleCondition(fr.Name))
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewUDPForwardingRuleCondition(fr.Name))
 	case forwardingrules.ProtocolL3:
 		result.Annotations[annotations.L3ForwardingRuleKey] = fr.Name
-		result.Conditions = append(result.Conditions, utils.NewL3ForwardingRuleCondition(fr.Name))
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewL3ForwardingRuleCondition(fr.Name))
 	}
 
 	l4.ensureIPv4NodesFirewall(nodeNames, fr.IPAddress, result)
@@ -780,10 +789,11 @@ func (l4 *L4) ensureIPv4NodesFirewall(nodeNames []string, ipAddress string, resu
 	if err != nil {
 		result.GCEResourceInError = annotations.FirewallRuleResource
 		result.Error = err
+		metaapi.SetStatusCondition(&result.Conditions, utils.NewConditionResourceAllocationFailed(utils.FirewallRuleConditionType, err.Error()))
 		return
 	}
 	result.Annotations[annotations.FirewallRuleKey] = firewallName
-	result.Conditions = append(result.Conditions, utils.NewFirewallCondition(firewallName))
+	metaapi.SetStatusCondition(&result.Conditions, utils.NewFirewallCondition(firewallName))
 }
 
 func (l4 *L4) getServiceSubnetworkURL(options gce.ILBOptions) (string, error) {

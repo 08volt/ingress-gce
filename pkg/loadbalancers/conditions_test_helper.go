@@ -126,7 +126,7 @@ func expectedL4LBIPv4Conditions(protocol string, bsName, frName, hcName, fwName,
 			Message: hcName,
 		},
 		{
-			Type:    utils.FirewallConditionType,
+			Type:    utils.FirewallRuleConditionType,
 			Status:  metav1.ConditionTrue,
 			Reason:  utils.ConditionReason,
 			Message: fwName,
@@ -183,13 +183,13 @@ func expectedL4LBDualStackConditions(protocol string, bsName, ipv4FrName, ipv6Fr
 			Message: hcName,
 		},
 		{
-			Type:    utils.FirewallConditionType,
+			Type:    utils.FirewallRuleConditionType,
 			Status:  metav1.ConditionTrue,
 			Reason:  utils.ConditionReason,
 			Message: ipv4FwName,
 		},
 		{
-			Type:    utils.IPv6FirewallConditionType,
+			Type:    utils.IPv6FirewallRuleConditionType,
 			Status:  metav1.ConditionTrue,
 			Reason:  utils.ConditionReason,
 			Message: ipv6FwName,
@@ -276,7 +276,7 @@ func expectedL4LBIPv6Conditions(protocol string, bsName, ipv6FrName, hcName, ipv
 			Message: hcName,
 		},
 		{
-			Type:    utils.IPv6FirewallConditionType,
+			Type:    utils.IPv6FirewallRuleConditionType,
 			Status:  metav1.ConditionTrue,
 			Reason:  utils.ConditionReason,
 			Message: ipv6FwName,
