@@ -42,29 +42,43 @@ import (
 // In a cluster with nodes node1... node 50. If nodes node10 to node 45 run the pods for a given ILB service, all these
 // nodes - node10, node 11 ... node45 will be part of the subset.
 type LocalL4EndpointsCalculator struct {
-	nodeLister      listers.NodeLister
-	zoneGetter      *zonegetter.ZoneGetter
-	subsetSizeLimit int
-	svcId           string
-	logger          klog.Logger
-	networkInfo     *network.NetworkInfo
-	negMetrics      *metrics.NegMetrics
+	nodeLister               listers.NodeLister
+	zoneGetter               *zonegetter.ZoneGetter
+	subsetSizeLimit          int
+	svcId                    string
+	includeDrainNodesL4Local bool
+	logger                   klog.Logger
+	networkInfo              *network.NetworkInfo
+	negMetrics               *metrics.NegMetrics
 }
 
-func NewLocalL4EndpointsCalculator(nodeLister listers.NodeLister, zoneGetter *zonegetter.ZoneGetter, svcId string, logger klog.Logger, networkInfo *network.NetworkInfo, lbType types.L4LBType, negMetrics *metrics.NegMetrics) *LocalL4EndpointsCalculator {
+// LocalL4EndpointsCalculatorParams contains the parameters for the LocalL4EndpointsCalculator
+type LocalL4EndpointsCalculatorParams struct {
+	NodeLister               listers.NodeLister
+	ZoneGetter               *zonegetter.ZoneGetter
+	SvcId                    string
+	Logger                   klog.Logger
+	NetworkInfo              *network.NetworkInfo
+	LbType                   types.L4LBType
+	NegMetrics               *metrics.NegMetrics
+	IncludeDrainNodesL4Local bool
+}
+
+func NewLocalL4EndpointsCalculator(params LocalL4EndpointsCalculatorParams) *LocalL4EndpointsCalculator {
 	subsetSize := maxSubsetSizeLocal
-	if lbType == types.L4ExternalLB {
+	if params.LbType == types.L4ExternalLB {
 		subsetSize = maxSubsetSizeNetLBLocal
 	}
 
 	return &LocalL4EndpointsCalculator{
-		nodeLister:      nodeLister,
-		zoneGetter:      zoneGetter,
-		subsetSizeLimit: subsetSize,
-		svcId:           svcId,
-		logger:          logger.WithName("LocalL4EndpointsCalculator"),
-		networkInfo:     networkInfo,
-		negMetrics:      negMetrics,
+		nodeLister:               params.NodeLister,
+		zoneGetter:               params.ZoneGetter,
+		subsetSizeLimit:          subsetSize,
+		svcId:                    params.SvcId,
+		includeDrainNodesL4Local: params.IncludeDrainNodesL4Local,
+		logger:                   params.Logger.WithName("LocalL4EndpointsCalculator"),
+		networkInfo:              params.NetworkInfo,
+		negMetrics:               params.NegMetrics,
 	}
 }
 
@@ -104,7 +118,10 @@ func (l *LocalL4EndpointsCalculator) CalculateEndpoints(eds []types.EndpointsDat
 				l.negMetrics.PublishNegControllerErrorCountMetrics(err, true)
 				continue
 			}
-			if ok := l.zoneGetter.IsNodeSelectedByFilter(node, zonegetter.CandidateAndUnreadyNodesFilter, l.logger); !ok {
+
+			filter := types.NodeFilterForEndpointCalculatorMode(types.L4LocalMode, l.includeDrainNodesL4Local)
+
+			if ok := l.zoneGetter.IsNodeSelectedByFilter(node, filter, l.logger); !ok {
 				l.logger.Info("Dropping Node from subset since it is not a valid LB candidate", "nodeName", node.Name)
 				continue
 			}
@@ -192,7 +209,7 @@ func (l *ClusterL4EndpointsCalculator) Mode() types.EndpointsCalculatorMode {
 // CalculateEndpoints determines the endpoints in the NEGs based on the current service endpoints and the current NEGs.
 func (l *ClusterL4EndpointsCalculator) CalculateEndpoints(eds []types.EndpointsData, currentMap map[types.NEGLocation]types.NetworkEndpointSet) (map[types.NEGLocation]types.NetworkEndpointSet, types.EndpointPodMap, int, error) {
 	// In this mode, any of the cluster nodes can be part of the subset, whether or not a matching pod runs on it.
-	nodes, _ := l.zoneGetter.ListNodes(zonegetter.CandidateAndUnreadyNodesFilter, l.logger)
+	nodes, _ := l.zoneGetter.ListNodes(types.NodeFilterForEndpointCalculatorMode(types.L4ClusterMode, false), l.logger)
 	zoneNodeMap := make(map[string][]*nodeWithSubnet)
 	zoneSubnetPairs := make(map[string]any)
 	networkInfoSubnetName, err := utils.KeyName(l.networkInfo.SubnetworkURL)

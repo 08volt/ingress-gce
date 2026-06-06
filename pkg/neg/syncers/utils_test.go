@@ -1355,7 +1355,7 @@ func TestRetrieveExistingZoneNetworkEndpointMap(t *testing.T) {
 	for _, tc := range testCases {
 		tc.mutate(negCloud)
 		// tc.mode of "" will result in the default node predicate being selected, which is ok for this test.
-		endpointSets, annotationMap, _, err := retrieveExistingZoneNetworkEndpointMap(tc.subnetToNegMapping, zoneGetter, negCloud, meta.VersionGA, tc.mode, tc.enableDualStackNEG, klog.TODO(), metrics.NewNegMetrics(), false)
+		endpointSets, annotationMap, _, err := retrieveExistingZoneNetworkEndpointMap(tc.subnetToNegMapping, zoneGetter, negCloud, meta.VersionGA, tc.mode, tc.enableDualStackNEG, klog.TODO(), metrics.NewNegMetrics(), false, false)
 
 		if tc.expectErr {
 			if err == nil {
@@ -1497,7 +1497,7 @@ func TestRetrieveExistingZoneNetworkEndpointMapHealth(t *testing.T) {
 			negName := "testNEG"
 
 			// ensure a NEG exists in each zone with relevant nodes
-			candidateNodeZones, err := zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4LocalMode), klog.TODO())
+			candidateNodeZones, err := zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4LocalMode, false), klog.TODO())
 			if err != nil {
 				t.Fatalf("zoneGetter.ListZones() %v", err)
 			}
@@ -1528,7 +1528,7 @@ func TestRetrieveExistingZoneNetworkEndpointMapHealth(t *testing.T) {
 
 			subnetToNegMapping := map[string]string{defaultTestSubnet: negName}
 
-			endpointSets, _, drainingEndpoints, err := retrieveExistingZoneNetworkEndpointMap(subnetToNegMapping, zoneGetter, fakeCloud, meta.VersionGA, negtypes.L4LocalMode, false, klog.TODO(), metrics.NewNegMetrics(), tc.useHealthStatus)
+			endpointSets, _, drainingEndpoints, err := retrieveExistingZoneNetworkEndpointMap(subnetToNegMapping, zoneGetter, fakeCloud, meta.VersionGA, negtypes.L4LocalMode, false, klog.TODO(), metrics.NewNegMetrics(), tc.useHealthStatus, false)
 			if err != nil {
 				t.Fatalf("retrieveExistingZoneNetworkEndpointMap: %v", err)
 			}

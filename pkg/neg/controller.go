@@ -116,6 +116,9 @@ type Controller struct {
 	// enableNEGsForIngress indicates whether the NEG controller will create NEGs for Ingress services
 	enableNEGsForIngress bool
 
+	// includeDrainNodesL4Local indicates whether to include draining nodes for NEGs with L4Local mode
+	includeDrainNodesL4Local bool
+
 	stopCh <-chan struct{}
 	logger klog.Logger
 
@@ -157,6 +160,7 @@ func NewController(
 	runL4ForNetLB bool,
 	readOnlyMode bool,
 	enableNEGsForIngress bool,
+	includeDrainNodesL4Local bool,
 	stopCh <-chan struct{},
 	logger klog.Logger,
 	negMetrics *metrics.NegMetrics,
@@ -206,6 +210,7 @@ func NewController(
 		lpConfig,
 		logger,
 		negMetrics,
+		includeDrainNodesL4Local,
 	)
 
 	var reflector readiness.Reflector
@@ -262,6 +267,7 @@ func NewController(
 		runL4ForNetLB:                  runL4ForNetLB,
 		readOnlyMode:                   readOnlyMode,
 		enableNEGsForIngress:           enableNEGsForIngress,
+		includeDrainNodesL4Local:       includeDrainNodesL4Local,
 		stopCh:                         stopCh,
 		logger:                         logger,
 		negMetrics:                     negMetrics,
@@ -342,11 +348,13 @@ func NewController(
 			oldNode := old.(*apiv1.Node)
 			currentNode := cur.(*apiv1.Node)
 
-			vmIpCandidateNodeCheck := zonegetter.CandidateAndUnreadyNodesFilter
-			vmIpPortCandidateNodeCheck := zonegetter.CandidateNodesFilter
+			l4LocalFilter := negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4LocalMode, negController.includeDrainNodesL4Local)
+			l4ClusterFilter := negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4ClusterMode, false)
+			l7Filter := zonegetter.CandidateNodesFilter
 
-			if zoneGetter.IsNodeSelectedByFilter(oldNode, vmIpCandidateNodeCheck, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, vmIpCandidateNodeCheck, logger) ||
-				zoneGetter.IsNodeSelectedByFilter(oldNode, vmIpPortCandidateNodeCheck, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, vmIpPortCandidateNodeCheck, logger) {
+			if zoneGetter.IsNodeSelectedByFilter(oldNode, l4LocalFilter, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l4LocalFilter, logger) ||
+				zoneGetter.IsNodeSelectedByFilter(oldNode, l4ClusterFilter, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l4ClusterFilter, logger) ||
+				zoneGetter.IsNodeSelectedByFilter(oldNode, l7Filter, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l7Filter, logger) {
 				logger.Info("Node has changed, enqueueing", "node", currentNode.Name)
 				negController.enqueueNode(currentNode)
 			}
@@ -824,7 +832,7 @@ func (c *Controller) mergeDefaultBackendServicePortInfoMap(key string, service *
 // syncNegStatusAnnotation syncs the neg status annotation
 // it takes service namespace, name and the expected service ports for NEGs.
 func (c *Controller) syncNegStatusAnnotation(namespace, name string, portMap negtypes.PortInfoMap) error {
-	zones, err := c.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(portMap.EndpointsCalculatorMode()), c.logger)
+	zones, err := c.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(portMap.EndpointsCalculatorMode(), c.includeDrainNodesL4Local), c.logger)
 	if err != nil {
 		return err
 	}

@@ -208,13 +208,22 @@ func NewTransactionSyncer(
 	return syncer
 }
 
-func GetEndpointsCalculator(podLister, nodeLister, serviceLister cache.Indexer, zoneGetter *zonegetter.ZoneGetter, syncerKey negtypes.NegSyncerKey, mode negtypes.EndpointsCalculatorMode, logger klog.Logger, enableDualStackNEG bool, syncMetricsCollector *metricscollector.SyncerMetrics, networkInfo *network.NetworkInfo, l4LBType negtypes.L4LBType, negMetrics *metrics.NegMetrics) negtypes.NetworkEndpointsCalculator {
+func GetEndpointsCalculator(podLister, nodeLister, serviceLister cache.Indexer, zoneGetter *zonegetter.ZoneGetter, syncerKey negtypes.NegSyncerKey, mode negtypes.EndpointsCalculatorMode, logger klog.Logger, enableDualStackNEG bool, syncMetricsCollector *metricscollector.SyncerMetrics, networkInfo *network.NetworkInfo, l4LBType negtypes.L4LBType, negMetrics *metrics.NegMetrics, includeDrainNodesL4Local bool) negtypes.NetworkEndpointsCalculator {
 	serviceKey := strings.Join([]string{syncerKey.Name, syncerKey.Namespace}, "/")
 	if syncerKey.NegType == negtypes.VmIpEndpointType {
 		nodeLister := listers.NewNodeLister(nodeLister)
 		switch mode {
 		case negtypes.L4LocalMode:
-			return NewLocalL4EndpointsCalculator(nodeLister, zoneGetter, serviceKey, logger, networkInfo, l4LBType, negMetrics)
+			return NewLocalL4EndpointsCalculator(LocalL4EndpointsCalculatorParams{
+				NodeLister:               nodeLister,
+				ZoneGetter:               zoneGetter,
+				SvcId:                    serviceKey,
+				Logger:                   logger,
+				NetworkInfo:              networkInfo,
+				LbType:                   l4LBType,
+				NegMetrics:               negMetrics,
+				IncludeDrainNodesL4Local: includeDrainNodesL4Local,
+			})
 		default:
 			return NewClusterL4EndpointsCalculator(nodeLister, zoneGetter, serviceKey, logger, networkInfo, l4LBType, negMetrics)
 		}
@@ -292,7 +301,7 @@ func (s *transactionSyncer) syncInternalImpl() error {
 		return err
 	}
 
-	currentMap, currentPodLabelMap, drainingEndpoints, err := retrieveExistingZoneNetworkEndpointMap(subnetToNegMapping, s.zoneGetter, s.cloud, s.NegSyncerKey.GetAPIVersion(), s.endpointsCalculator.Mode(), s.enableDualStackNEG, s.logger, s.negMetrics, needInitDrainStatus)
+	currentMap, currentPodLabelMap, drainingEndpoints, err := retrieveExistingZoneNetworkEndpointMap(subnetToNegMapping, s.zoneGetter, s.cloud, s.NegSyncerKey.GetAPIVersion(), s.endpointsCalculator.Mode(), s.enableDualStackNEG, s.logger, s.negMetrics, needInitDrainStatus, s.NegSyncerKey.IncludeDrainNodesL4Local)
 	if err != nil {
 		return fmt.Errorf("%w: %w", negtypes.ErrCurrentNegEPNotFound, err)
 	}
@@ -510,7 +519,7 @@ func (s *transactionSyncer) resetErrorState() {
 // ensureNetworkEndpointGroups ensures NEGs are created and configured correctly in the corresponding zones.
 func (s *transactionSyncer) ensureNetworkEndpointGroups() error {
 	// NEGs should be created in zones with candidate nodes only.
-	zones, err := s.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(s.EpCalculatorMode), s.logger)
+	zones, err := s.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(s.EpCalculatorMode, s.NegSyncerKey.IncludeDrainNodesL4Local), s.logger)
 	if err != nil {
 		return err
 	}
@@ -899,7 +908,7 @@ func (s *transactionSyncer) isZoneChange() bool {
 		existingZones.Insert(id.Key.Zone)
 	}
 
-	zones, err := s.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(s.EpCalculatorMode), s.logger)
+	zones, err := s.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(s.EpCalculatorMode, s.NegSyncerKey.IncludeDrainNodesL4Local), s.logger)
 	if err != nil {
 		s.logger.Error(err, "unable to list zones")
 		s.negMetrics.PublishNegControllerErrorCountMetrics(err, true)

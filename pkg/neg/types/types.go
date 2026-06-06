@@ -296,6 +296,9 @@ type NegSyncerKey struct {
 
 	// L4LBType indicates which L4 LB this syncer is running for. For non L4 GCE_GM_IP NEGs this should be empty.
 	L4LBType L4LBType
+
+	// IncludeDrainNodesL4Local indicates whether to include draining nodes for L4 local mode NEGs
+	IncludeDrainNodesL4Local bool
 }
 
 func (key NegSyncerKey) String() string {
@@ -384,20 +387,18 @@ func EndpointsDataFromEndpointSlices(slices []*discovery.EndpointSlice) []Endpoi
 }
 
 // NodeFilterForEndpointCalculatorMode returns the filter type to select candidate nodes, given the endpoints calculator mode.
-func NodeFilterForEndpointCalculatorMode(mode EndpointsCalculatorMode) zonegetter.Filter {
-	// VM_IP NEGs can include unready and upgrading nodes.
-	if mode == L4ClusterMode || mode == L4LocalMode {
-		return NodeFilterForNetworkEndpointType(VmIpEndpointType)
+func NodeFilterForEndpointCalculatorMode(mode EndpointsCalculatorMode, includeDrainNodesL4Local bool) zonegetter.Filter {
+	if mode == L4LocalMode && includeDrainNodesL4Local {
+		return zonegetter.CandidateNodesFilter
 	}
-	return NodeFilterForNetworkEndpointType(VmIpPortEndpointType)
-}
-
-// NodeFilterForNetworkEndpointType returns the filter type to select candidate nodes, given the NEG type.
-func NodeFilterForNetworkEndpointType(negType NetworkEndpointType) zonegetter.Filter {
-	if negType == VmIpEndpointType {
+	if mode == L4ClusterMode || mode == L4LocalMode {
 		return zonegetter.CandidateAndUnreadyNodesFilter
 	}
 	return zonegetter.CandidateNodesFilter
+}
+
+func NodeFilterForVMIPPortEndpointType() zonegetter.Filter {
+	return NodeFilterForEndpointCalculatorMode(L7Mode, false)
 }
 
 // NegInfo holds the identifying information regarding a NEG.

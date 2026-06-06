@@ -55,15 +55,16 @@ func TestLocalGetEndpointSet(t *testing.T) {
 	defer func() { flags.F.EnableMultiSubnetCluster = prevFlag }()
 	flags.F.EnableMultiSubnetCluster = false
 	testCases := []struct {
-		desc                string
-		endpointsData       []negtypes.EndpointsData
-		wantEndpointSets    map[negtypes.NEGLocation]negtypes.NetworkEndpointSet
-		networkEndpointType negtypes.NetworkEndpointType
-		nodeLabelsMap       map[string]map[string]string
-		nodeAnnotationsMap  map[string]map[string]string
-		nodeReadyStatusMap  map[string]v1.ConditionStatus
-		nodeNames           []string
-		network             network.NetworkInfo
+		desc                     string
+		endpointsData            []negtypes.EndpointsData
+		wantEndpointSets         map[negtypes.NEGLocation]negtypes.NetworkEndpointSet
+		networkEndpointType      negtypes.NetworkEndpointType
+		nodeLabelsMap            map[string]map[string]string
+		nodeAnnotationsMap       map[string]map[string]string
+		nodeReadyStatusMap       map[string]v1.ConditionStatus
+		nodeNames                []string
+		network                  network.NetworkInfo
+		includeDrainNodesL4Local bool
 	}{
 		{
 			desc:          "default endpoints",
@@ -159,11 +160,66 @@ func TestLocalGetEndpointSet(t *testing.T) {
 			nodeNames:           []string{testInstance1, testInstance2, testInstance3, testInstance4, testInstance5, testInstance6},
 			network:             defaultNetwork,
 		},
+		{
+			desc:          "default endpoints, all nodes unready with IncludeDrainNodesL4Local enabled",
+			endpointsData: negtypes.EndpointsDataFromEndpointSlices(getDefaultEndpointSlices()),
+			// no nodes are picked since all nodes are unready, and we filter only candidate nodes
+			wantEndpointSets:    map[negtypes.NEGLocation]negtypes.NetworkEndpointSet{},
+			networkEndpointType: negtypes.VmIpEndpointType,
+			nodeNames:           []string{testInstance1, testInstance2, testInstance3, testInstance4, testInstance5, testInstance6},
+			nodeReadyStatusMap: map[string]v1.ConditionStatus{
+				testInstance1: v1.ConditionFalse, testInstance2: v1.ConditionFalse, testInstance3: v1.ConditionFalse, testInstance4: v1.ConditionFalse, testInstance5: v1.ConditionFalse, testInstance6: v1.ConditionFalse,
+			},
+			network:                  defaultNetwork,
+			includeDrainNodesL4Local: true,
+		},
+		{
+			desc:          "default endpoints, some nodes unready with IncludeDrainNodesL4Local enabled",
+			endpointsData: negtypes.EndpointsDataFromEndpointSlices(getDefaultEndpointSlices()),
+			// only ready nodes are picked (testInstance1, testInstance3)
+			wantEndpointSets: map[negtypes.NEGLocation]negtypes.NetworkEndpointSet{
+				{Zone: negtypes.TestZone1, Subnet: defaultTestSubnet}: negtypes.NewNetworkEndpointSet(negtypes.NetworkEndpoint{IP: "1.2.3.1", Node: testInstance1}),
+				{Zone: negtypes.TestZone2, Subnet: defaultTestSubnet}: negtypes.NewNetworkEndpointSet(negtypes.NetworkEndpoint{IP: "1.2.3.3", Node: testInstance3}),
+			},
+			networkEndpointType: negtypes.VmIpEndpointType,
+			nodeNames:           []string{testInstance1, testInstance2, testInstance3, testInstance4, testInstance5, testInstance6},
+			nodeReadyStatusMap: map[string]v1.ConditionStatus{
+				testInstance1: v1.ConditionTrue, testInstance2: v1.ConditionFalse, testInstance3: v1.ConditionTrue, testInstance4: v1.ConditionFalse, testInstance5: v1.ConditionTrue, testInstance6: v1.ConditionTrue,
+			},
+			network:                  defaultNetwork,
+			includeDrainNodesL4Local: true,
+		},
+		{
+			desc:          "default endpoints, upgrading nodes included with IncludeDrainNodesL4Local enabled",
+			endpointsData: negtypes.EndpointsDataFromEndpointSlices(getDefaultEndpointSlices()),
+			nodeLabelsMap: map[string]map[string]string{
+				testInstance1: {utils.LabelNodeRoleExcludeBalancer: "true"},
+				testInstance3: {utils.GKECurrentOperationLabel: utils.NodeDrain},
+			},
+			nodeNames: []string{testInstance1, testInstance2, testInstance3, testInstance4, testInstance5, testInstance6},
+			// testInstance3 (upgrading) is included, but testInstance1 (exclude balancer) is still excluded.
+			wantEndpointSets: map[negtypes.NEGLocation]negtypes.NetworkEndpointSet{
+				{Zone: negtypes.TestZone1, Subnet: defaultTestSubnet}: negtypes.NewNetworkEndpointSet(negtypes.NetworkEndpoint{IP: "1.2.3.2", Node: testInstance2}),
+				{Zone: negtypes.TestZone2, Subnet: defaultTestSubnet}: negtypes.NewNetworkEndpointSet(negtypes.NetworkEndpoint{IP: "1.2.3.3", Node: testInstance3}, negtypes.NetworkEndpoint{IP: "1.2.3.4", Node: testInstance4}),
+			},
+			networkEndpointType:      negtypes.VmIpEndpointType,
+			network:                  defaultNetwork,
+			includeDrainNodesL4Local: true,
+		},
 	}
 	svcKey := fmt.Sprintf("%s/%s", testServiceName, testServiceNamespace)
 	for _, tc := range testCases {
 		t.Run(tc.desc, func(t *testing.T) {
-			ec := NewLocalL4EndpointsCalculator(listers.NewNodeLister(nodeInformer.GetIndexer()), zoneGetter, svcKey, klog.TODO(), &tc.network, negtypes.L4InternalLB, metrics.NewNegMetrics())
+			ec := NewLocalL4EndpointsCalculator(LocalL4EndpointsCalculatorParams{
+				NodeLister:               listers.NewNodeLister(nodeInformer.GetIndexer()),
+				ZoneGetter:               zoneGetter,
+				SvcId:                    svcKey,
+				Logger:                   klog.TODO(),
+				NetworkInfo:              &tc.network,
+				LbType:                   negtypes.L4InternalLB,
+				NegMetrics:               metrics.NewNegMetrics(),
+				IncludeDrainNodesL4Local: tc.includeDrainNodesL4Local,
+			})
 			updateNodes(t, tc.nodeNames, tc.nodeLabelsMap, tc.nodeAnnotationsMap, tc.nodeReadyStatusMap, nodeInformer.GetIndexer())
 			retSet, _, _, err := ec.CalculateEndpoints(tc.endpointsData, nil)
 			if err != nil {
@@ -1223,7 +1279,16 @@ func TestValidateEndpoints(t *testing.T) {
 	}
 	L7EndpointsCalculatorMSC := NewL7EndpointsCalculator(zoneGetterMSC, podLister, nodeLister, serviceLister, svcPort, klog.TODO(), testContext.EnableDualStackNEG, metricscollector.FakeSyncerMetrics(), testContext.NegMetrics)
 	L7EndpointsCalculatorMSC.enableMultiSubnetCluster = true
-	L4LocalEndpointCalculator := NewLocalL4EndpointsCalculator(listers.NewNodeLister(nodeLister), zoneGetter, fmt.Sprintf("%s/%s", testServiceName, testServiceNamespace), klog.TODO(), &network.NetworkInfo{SubnetworkURL: defaultTestSubnetURL}, negtypes.L4InternalLB, testContext.NegMetrics)
+	L4LocalEndpointCalculator := NewLocalL4EndpointsCalculator(LocalL4EndpointsCalculatorParams{
+		NodeLister:               listers.NewNodeLister(nodeLister),
+		ZoneGetter:               zoneGetter,
+		SvcId:                    fmt.Sprintf("%s/%s", testServiceName, testServiceNamespace),
+		Logger:                   klog.TODO(),
+		NetworkInfo:              &network.NetworkInfo{SubnetworkURL: defaultTestSubnetURL},
+		LbType:                   negtypes.L4InternalLB,
+		NegMetrics:               testContext.NegMetrics,
+		IncludeDrainNodesL4Local: false,
+	})
 	L4ClusterEndpointCalculator := NewClusterL4EndpointsCalculator(listers.NewNodeLister(nodeLister), zoneGetter, fmt.Sprintf("%s/%s", testServiceName, testServiceNamespace), klog.TODO(), &network.NetworkInfo{SubnetworkURL: defaultTestSubnetURL}, negtypes.L4InternalLB, testContext.NegMetrics)
 
 	l7TestEPS := []*discovery.EndpointSlice{

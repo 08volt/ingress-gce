@@ -115,6 +115,7 @@ func NewTestSyncerManager(kubeClient kubernetes.Interface) (*syncerManager, *gce
 		labels.PodLabelPropagationConfig{},
 		klog.TODO(),
 		metrics.NewNegMetrics(),
+		false,
 	)
 	return manager, testContext.Cloud, testContext, nil
 }

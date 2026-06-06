@@ -117,6 +117,9 @@ type syncerManager struct {
 	// lpConfig configures the pod label to be propagated to NEG endpoints.
 	lpConfig podlabels.PodLabelPropagationConfig
 
+	// includeDrainNodesL4Local indicates whether to include draining nodes for L4 local mode NEGs
+	includeDrainNodesL4Local bool
+
 	negMetrics *metrics.NegMetrics
 }
 
@@ -138,34 +141,36 @@ func newSyncerManager(namer negtypes.NetworkEndpointGroupNamer,
 	numGCWorkers int,
 	lpConfig podlabels.PodLabelPropagationConfig,
 	logger klog.Logger,
-	negMetrics *metrics.NegMetrics) *syncerManager {
+	negMetrics *metrics.NegMetrics,
+	includeDrainNodesL4Local bool) *syncerManager {
 
 	var vmIpPortZoneMap map[string]struct{}
-	updateZoneMap(&vmIpPortZoneMap, negtypes.NodeFilterForNetworkEndpointType(negtypes.VmIpPortEndpointType), zoneGetter, logger, negMetrics)
+	updateZoneMap(&vmIpPortZoneMap, negtypes.NodeFilterForVMIPPortEndpointType(), zoneGetter, logger, negMetrics)
 
 	return &syncerManager{
-		namer:               namer,
-		l4Namer:             l4Namer,
-		recorder:            recorder,
-		cloud:               cloud,
-		zoneGetter:          zoneGetter,
-		nodeLister:          nodeLister,
-		podLister:           podLister,
-		serviceLister:       serviceLister,
-		endpointSliceLister: endpointSliceLister,
-		svcNegLister:        svcNegLister,
-		svcPortMap:          make(map[serviceKey]negtypes.PortInfoMap),
-		syncerMap:           make(map[negtypes.NegSyncerKey]negtypes.NegSyncer),
-		syncerMetrics:       syncerMetrics,
-		svcNegClient:        svcNegClient,
-		kubeSystemUID:       kubeSystemUID,
-		enableNonGcpMode:    enableNonGcpMode,
-		enableDualStackNEG:  enableDualStackNEG,
-		numGCWorkers:        numGCWorkers,
-		logger:              logger,
-		vmIpPortZoneMap:     vmIpPortZoneMap,
-		lpConfig:            lpConfig,
-		negMetrics:          negMetrics,
+		namer:                    namer,
+		l4Namer:                  l4Namer,
+		recorder:                 recorder,
+		cloud:                    cloud,
+		zoneGetter:               zoneGetter,
+		nodeLister:               nodeLister,
+		podLister:                podLister,
+		serviceLister:            serviceLister,
+		endpointSliceLister:      endpointSliceLister,
+		svcNegLister:             svcNegLister,
+		svcPortMap:               make(map[serviceKey]negtypes.PortInfoMap),
+		syncerMap:                make(map[negtypes.NegSyncerKey]negtypes.NegSyncer),
+		syncerMetrics:            syncerMetrics,
+		svcNegClient:             svcNegClient,
+		kubeSystemUID:            kubeSystemUID,
+		enableNonGcpMode:         enableNonGcpMode,
+		enableDualStackNEG:       enableDualStackNEG,
+		numGCWorkers:             numGCWorkers,
+		logger:                   logger,
+		vmIpPortZoneMap:          vmIpPortZoneMap,
+		lpConfig:                 lpConfig,
+		includeDrainNodesL4Local: includeDrainNodesL4Local,
+		negMetrics:               negMetrics,
 	}
 }
 
@@ -235,6 +240,7 @@ func (manager *syncerManager) EnsureSyncers(namespace, name string, newPorts neg
 				&portInfo.NetworkInfo,
 				portInfo.L4LBType,
 				manager.negMetrics,
+				manager.includeDrainNodesL4Local,
 			)
 			nonDefaultSubnetNEGNamer := manager.namer
 			if syncerKey.NegType == negtypes.VmIpEndpointType {
@@ -320,7 +326,7 @@ func (manager *syncerManager) SyncNodes() {
 	defer manager.mu.Unlock()
 
 	// When a zone change occurs (new zone is added or deleted), a sync should be triggered
-	isVmIpPortZoneChange := updateZoneMap(&manager.vmIpPortZoneMap, negtypes.NodeFilterForNetworkEndpointType(negtypes.VmIpPortEndpointType), manager.zoneGetter, manager.logger, manager.negMetrics)
+	isVmIpPortZoneChange := updateZoneMap(&manager.vmIpPortZoneMap, negtypes.NodeFilterForVMIPPortEndpointType(), manager.zoneGetter, manager.logger, manager.negMetrics)
 
 	for key, syncer := range manager.syncerMap {
 		manager.logger.V(1).Info("SyncNodes: Evaluating sync decision for syncer", "negSyncerKey", key.String())
@@ -907,13 +913,14 @@ func (manager *syncerManager) getSyncerKey(namespace, name string, servicePortKe
 	}
 
 	return negtypes.NegSyncerKey{
-		Namespace:        namespace,
-		Name:             name,
-		NegName:          portInfo.NegName,
-		PortTuple:        portInfo.PortTuple,
-		NegType:          networkEndpointType,
-		EpCalculatorMode: calculatorMode,
-		L4LBType:         portInfo.L4LBType,
+		Namespace:                namespace,
+		Name:                     name,
+		NegName:                  portInfo.NegName,
+		PortTuple:                portInfo.PortTuple,
+		NegType:                  networkEndpointType,
+		EpCalculatorMode:         calculatorMode,
+		L4LBType:                 portInfo.L4LBType,
+		IncludeDrainNodesL4Local: manager.includeDrainNodesL4Local,
 	}
 }
 
