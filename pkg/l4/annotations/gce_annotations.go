@@ -29,6 +29,10 @@ const (
 	// Currently, only "Internal" is supported.
 	ServiceAnnotationLoadBalancerType = "networking.gke.io/load-balancer-type"
 
+	// ServiceAnnotationL4NEGLocalIncludeDrainNodes determines if draining nodes are included
+	// in L4 local mode NEG endpoint calculations for this service.
+	ServiceAnnotationL4NEGLocalIncludeDrainNodes = "networking.gke.io/l4-neg-local-include-drain-nodes"
+
 	// Deprecating the old-style naming of LoadBalancerType annotation
 	deprecatedServiceAnnotationLoadBalancerType = "cloud.google.com/load-balancer-type"
 

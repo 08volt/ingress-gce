@@ -18,6 +18,7 @@ package neg
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	nodetopologyv1 "github.com/GoogleCloudPlatform/gke-networking-api/apis/nodetopology/v1"
@@ -348,11 +349,13 @@ func NewController(
 			oldNode := old.(*apiv1.Node)
 			currentNode := cur.(*apiv1.Node)
 
-			l4LocalFilter := negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4LocalMode, negController.includeDrainNodesL4Local)
+			l4LocalFilterTrue := negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4LocalMode, true)
+			l4LocalFilterFalse := negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4LocalMode, false)
 			l4ClusterFilter := negtypes.NodeFilterForEndpointCalculatorMode(negtypes.L4ClusterMode, false)
 			l7Filter := zonegetter.CandidateNodesFilter
 
-			if zoneGetter.IsNodeSelectedByFilter(oldNode, l4LocalFilter, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l4LocalFilter, logger) ||
+			if zoneGetter.IsNodeSelectedByFilter(oldNode, l4LocalFilterTrue, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l4LocalFilterTrue, logger) ||
+				zoneGetter.IsNodeSelectedByFilter(oldNode, l4LocalFilterFalse, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l4LocalFilterFalse, logger) ||
 				zoneGetter.IsNodeSelectedByFilter(oldNode, l4ClusterFilter, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l4ClusterFilter, logger) ||
 				zoneGetter.IsNodeSelectedByFilter(oldNode, l7Filter, logger) != zoneGetter.IsNodeSelectedByFilter(currentNode, l7Filter, logger) {
 				logger.Info("Node has changed, enqueueing", "node", currentNode.Name)
@@ -742,7 +745,16 @@ func (c *Controller) mergeVmIpNEGsPortInfo(service *apiv1.Service, name types.Na
 		l4LBType = negtypes.L4ExternalLB
 	}
 
-	return portInfoMap.Merge(negtypes.NewPortInfoMapForVMIPNEG(name.Namespace, name.Name, c.l4Namer, onlyLocal, networkInfo, l4LBType))
+	includeDrainNodes := false
+	if c.includeDrainNodesL4Local {
+		if val, ok := service.Annotations[l4annotations.ServiceAnnotationL4NEGLocalIncludeDrainNodes]; ok {
+			if parsed, err := strconv.ParseBool(val); err == nil {
+				includeDrainNodes = parsed
+			}
+		}
+	}
+
+	return portInfoMap.Merge(negtypes.NewPortInfoMapForVMIPNEG(name.Namespace, name.Name, c.l4Namer, onlyLocal, networkInfo, l4LBType, includeDrainNodes))
 }
 
 // netLBServiceNeedsNEG determines if NEGs need to be created for L4 NetLB.
@@ -832,7 +844,7 @@ func (c *Controller) mergeDefaultBackendServicePortInfoMap(key string, service *
 // syncNegStatusAnnotation syncs the neg status annotation
 // it takes service namespace, name and the expected service ports for NEGs.
 func (c *Controller) syncNegStatusAnnotation(namespace, name string, portMap negtypes.PortInfoMap) error {
-	zones, err := c.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(portMap.EndpointsCalculatorMode(), c.includeDrainNodesL4Local), c.logger)
+	zones, err := c.zoneGetter.ListZones(negtypes.NodeFilterForEndpointCalculatorMode(portMap.EndpointsCalculatorMode(), portMap.IncludeDrainNodesL4Local()), c.logger)
 	if err != nil {
 		return err
 	}

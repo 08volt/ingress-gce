@@ -1920,7 +1920,7 @@ func TestL4SyncerUpdates(t *testing.T) {
 			svcName := "svc1"
 			manager.serviceLister.Add(&v1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: svcNamespace, Name: svcName}})
 
-			initialPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(svcNamespace, svcName, testContext.L4Namer, bool(tc.fromTrafficPolicy), defaultNetwork, tc.fromLBType)
+			initialPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(svcNamespace, svcName, testContext.L4Namer, bool(tc.fromTrafficPolicy), defaultNetwork, tc.fromLBType, false)
 
 			_, _, err = manager.EnsureSyncers(svcNamespace, svcName, initialPortInfoMap)
 			if err != nil {
@@ -1935,7 +1935,7 @@ func TestL4SyncerUpdates(t *testing.T) {
 				t.Errorf("initialSyncer for LB type: %s, local: %v, was expected to be running but is is not", tc.fromLBType, tc.fromTrafficPolicy)
 			}
 
-			updatedPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(svcNamespace, svcName, testContext.L4Namer, bool(tc.toTrafficPolicy), defaultNetwork, tc.toLBType)
+			updatedPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(svcNamespace, svcName, testContext.L4Namer, bool(tc.toTrafficPolicy), defaultNetwork, tc.toLBType, false)
 
 			rebuildSvcNegCache(t, manager, manager.svcNegClient, svcNamespace)
 

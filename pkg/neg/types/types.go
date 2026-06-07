@@ -140,6 +140,8 @@ type PortInfo struct {
 	NetworkInfo network.NetworkInfo
 	// The type of the L4 LB. For L7 this should be left empty.
 	L4LBType L4LBType
+	// IncludeDrainNodesL4Local indicates whether to include draining nodes for NEGs with L4Local mode
+	IncludeDrainNodesL4Local bool
 }
 
 // PortInfoMapKey is the Key of PortInfoMap
@@ -170,7 +172,7 @@ func NewPortInfoMap(namespace, name string, svcPortTupleSet SvcPortTupleSet, nam
 
 // NewPortInfoMapForVMIPNEG creates PortInfoMap with empty port tuple. Since VM_IP NEGs target
 // the node instead of the pod, there is no port info to be stored.
-func NewPortInfoMapForVMIPNEG(namespace, name string, namer namer.L4ResourcesNamer, local bool, networkInfo *network.NetworkInfo, l4LBType L4LBType) PortInfoMap {
+func NewPortInfoMapForVMIPNEG(namespace, name string, namer namer.L4ResourcesNamer, local bool, networkInfo *network.NetworkInfo, l4LBType L4LBType, includeDrainNodesL4Local bool) PortInfoMap {
 	ret := PortInfoMap{}
 	svcPortSet := make(SvcPortTupleSet)
 	svcPortSet.Insert(
@@ -184,11 +186,12 @@ func NewPortInfoMapForVMIPNEG(namespace, name string, namer namer.L4ResourcesNam
 		}
 		negName := namer.L4Backend(namespace, name)
 		ret[PortInfoMapKey{svcPortTuple.Port}] = PortInfo{
-			PortTuple:        svcPortTuple,
-			NegName:          negName,
-			EpCalculatorMode: mode,
-			NetworkInfo:      *networkInfo,
-			L4LBType:         l4LBType,
+			PortTuple:                svcPortTuple,
+			NegName:                  negName,
+			EpCalculatorMode:         mode,
+			NetworkInfo:              *networkInfo,
+			L4LBType:                 l4LBType,
+			IncludeDrainNodesL4Local: includeDrainNodesL4Local,
 		}
 	}
 	return ret
@@ -214,6 +217,9 @@ func (p1 PortInfoMap) Merge(p2 PortInfoMap) error {
 			if existingPortInfo.EpCalculatorMode != portInfo.EpCalculatorMode {
 				return fmt.Errorf("For service port %v, Existing map has Calculator mode %v, but the merge map has %v", mapKey, existingPortInfo.EpCalculatorMode, portInfo.EpCalculatorMode)
 			}
+			if existingPortInfo.IncludeDrainNodesL4Local != portInfo.IncludeDrainNodesL4Local {
+				return fmt.Errorf("For service port %v, Existing map has IncludeDrainNodesL4Local %v, but the merge map has %v", mapKey, existingPortInfo.IncludeDrainNodesL4Local, portInfo.IncludeDrainNodesL4Local)
+			}
 			mergedInfo.ReadinessGate = existingPortInfo.ReadinessGate
 		}
 		mergedInfo.PortTuple = portInfo.PortTuple
@@ -223,6 +229,7 @@ func (p1 PortInfoMap) Merge(p2 PortInfoMap) error {
 		mergedInfo.EpCalculatorMode = portInfo.EpCalculatorMode
 		mergedInfo.NetworkInfo = portInfo.NetworkInfo
 		mergedInfo.L4LBType = portInfo.L4LBType
+		mergedInfo.IncludeDrainNodesL4Local = portInfo.IncludeDrainNodesL4Local
 
 		p1[mapKey] = mergedInfo
 	}
@@ -271,6 +278,16 @@ func (p1 PortInfoMap) EndpointsCalculatorMode() EndpointsCalculatorMode {
 		}
 	}
 	return L7Mode
+}
+
+// IncludeDrainNodesL4Local returns the includeDrainNodesL4Local setting for L4Local mode in this portInfoMap.
+func (p1 PortInfoMap) IncludeDrainNodesL4Local() bool {
+	for _, portInfo := range p1 {
+		if portInfo.EpCalculatorMode == L4LocalMode {
+			return portInfo.IncludeDrainNodesL4Local
+		}
+	}
+	return false
 }
 
 // NegSyncerKey includes information to uniquely identify a NEG syncer

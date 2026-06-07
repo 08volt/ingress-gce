@@ -487,7 +487,7 @@ func TestEnableNEGServiceWithL4ILB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Service was not created.(*apiv1.Service) successfully, err: %v", err)
 	}
-	expectedPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, false, defaultNetwork, negtypes.L4InternalLB)
+	expectedPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, false, defaultNetwork, negtypes.L4InternalLB, false)
 	// There will be only one entry in the map
 	for key, val := range expectedPortInfoMap {
 		prevSyncerKey = manager.getSyncerKey(testServiceNamespace, testServiceName, key, val)
@@ -508,7 +508,7 @@ func TestEnableNEGServiceWithL4ILB(t *testing.T) {
 	if err = controller.processService(svcKey); err != nil {
 		t.Fatalf("Failed to process updated L4 ILB service: %v", err)
 	}
-	expectedPortInfoMap = negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4InternalLB)
+	expectedPortInfoMap = negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4InternalLB, false)
 	// There will be only one entry in the map
 	for key, val := range expectedPortInfoMap {
 		updatedSyncerKey = manager.getSyncerKey(testServiceNamespace, testServiceName, key, val)
@@ -1329,7 +1329,7 @@ func TestMergeVmIpNEGsPortInfo(t *testing.T) {
 			svc:            serviceILBWithFinalizer,
 			networkInfo:    defaultNetwork,
 			runL4ILB:       true,
-			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, false, defaultNetwork, negtypes.L4InternalLB),
+			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, false, defaultNetwork, negtypes.L4InternalLB, false),
 		},
 		{
 			desc:           "ILB legacy service",
@@ -1341,7 +1341,7 @@ func TestMergeVmIpNEGsPortInfo(t *testing.T) {
 			desc:           "RBS Multinet Service",
 			svc:            newTestRBSMultinetService(controller, true, 80),
 			networkInfo:    secondaryNetwork,
-			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, secondaryNetwork, negtypes.L4ExternalLB),
+			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, secondaryNetwork, negtypes.L4ExternalLB, false),
 		},
 		{
 			desc:           "RBS non-multinet Service",
@@ -1354,14 +1354,14 @@ func TestMergeVmIpNEGsPortInfo(t *testing.T) {
 			svc:            newTestRBSService(controller, true, 80, common.NetLBFinalizerV3),
 			networkInfo:    defaultNetwork,
 			runL4NetLB:     true,
-			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4ExternalLB),
+			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4ExternalLB, false),
 		},
 		{
 			desc:           "RBS non-multinet Service with NEG without RBS annotations",
 			svc:            svcWithAnnotations(newTestRBSService(controller, true, 80, common.NetLBFinalizerV3), nil),
 			networkInfo:    defaultNetwork,
 			runL4NetLB:     true,
-			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4ExternalLB),
+			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4ExternalLB, false),
 		},
 		{
 			desc:           "RBS non-multinet Service with NEG but NEGs not enabled for NetLB",
@@ -1383,14 +1383,14 @@ func TestMergeVmIpNEGsPortInfo(t *testing.T) {
 			svc:            serviceExternalLoadBalancerClass,
 			networkInfo:    defaultNetwork,
 			runL4NetLB:     true,
-			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4ExternalLB),
+			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4ExternalLB, false),
 		},
 		{
 			desc:           "Service with ILB loadBalancerClass",
 			svc:            serviceInternalLoadBalancerClass,
 			networkInfo:    defaultNetwork,
 			runL4ILB:       true,
-			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4InternalLB),
+			wantSvcPortMap: negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, defaultNetwork, negtypes.L4InternalLB, false),
 		},
 	}
 
@@ -1741,7 +1741,7 @@ func TestEnableNEGServiceWithL4NetLB(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Service was not created.(*apiv1.Service) successfully, err: %v", err)
 	}
-	expectedPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, networkInfo, negtypes.L4ExternalLB)
+	expectedPortInfoMap := negtypes.NewPortInfoMapForVMIPNEG(testServiceNamespace, testServiceName, controller.l4Namer, true, networkInfo, negtypes.L4ExternalLB, false)
 	// There will be only one entry in the map
 	for key, val := range expectedPortInfoMap {
 		prevSyncerKey = manager.getSyncerKey(testServiceNamespace, testServiceName, key, val)
@@ -2594,4 +2594,139 @@ func TestNodeInformerFilterWithIncludeDrainNodesL4Local(t *testing.T) {
 	// we will not enqueue this node update.
 	// We want to verify that the node IS enqueued (because we also check CandidateAndUnreadyNodesFilter).
 	ensureNodeEnqueue(t, "upgrading-node", controller)
+}
+
+func TestServiceAnnotationIncludeDrainNodesL4Local(t *testing.T) {
+	t.Parallel()
+	kubeClient := fake.NewSimpleClientset()
+	testContext := negtypes.NewTestContextWithKubeClient(kubeClient)
+	defaultNetwork := &network.NetworkInfo{
+		IsDefault:  true,
+		K8sNetwork: "default",
+	}
+
+	testCases := []struct {
+		desc               string
+		globalFlag         bool
+		serviceAnnotations map[string]string
+		expectIncludeDrain bool
+	}{
+		{
+			desc:               "Global flag false, no annotation -> false",
+			globalFlag:         false,
+			serviceAnnotations: nil,
+			expectIncludeDrain: false,
+		},
+		{
+			desc:               "Global flag false, annotation true -> false (gated by global flag)",
+			globalFlag:         false,
+			serviceAnnotations: map[string]string{l4annotations.ServiceAnnotationL4NEGLocalIncludeDrainNodes: "true"},
+			expectIncludeDrain: false,
+		},
+		{
+			desc:               "Global flag true, no annotation -> false",
+			globalFlag:         true,
+			serviceAnnotations: nil,
+			expectIncludeDrain: false,
+		},
+		{
+			desc:               "Global flag true, annotation true -> true",
+			globalFlag:         true,
+			serviceAnnotations: map[string]string{l4annotations.ServiceAnnotationL4NEGLocalIncludeDrainNodes: "true"},
+			expectIncludeDrain: true,
+		},
+		{
+			desc:               "Global flag true, annotation false -> false",
+			globalFlag:         true,
+			serviceAnnotations: map[string]string{l4annotations.ServiceAnnotationL4NEGLocalIncludeDrainNodes: "false"},
+			expectIncludeDrain: false,
+		},
+		{
+			desc:               "Global flag true, annotation invalid -> false",
+			globalFlag:         true,
+			serviceAnnotations: map[string]string{l4annotations.ServiceAnnotationL4NEGLocalIncludeDrainNodes: "invalid"},
+			expectIncludeDrain: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.desc, func(t *testing.T) {
+			zoneGetter, err := zonegetter.NewFakeZoneGetter(testContext.NodeInformer, zonegetter.FakeNodeTopologyInformer(), defaultTestSubnetURL, false)
+			if err != nil {
+				t.Fatalf("failed to create fake zone getter: %v", err)
+			}
+
+			controller, err := NewController(
+				kubeClient,
+				testContext.SvcNegClient,
+				kubeClient,
+				testContext.KubeSystemUID,
+				testContext.IngressInformer,
+				testContext.ServiceInformer,
+				testContext.PodInformer,
+				testContext.NodeInformer,
+				testContext.EndpointSliceInformer,
+				testContext.SvcNegInformer,
+				testContext.NetworkInformer,
+				testContext.GKENetworkParamSetInformer,
+				testContext.NodeTopologyInformer,
+				func() bool { return true },
+				testContext.L4Namer,
+				defaultBackend,
+				negtypes.NewAdapter(testContext.Cloud, testContext.NegMetrics),
+				zoneGetter,
+				testContext.NegNamer,
+				testContext.ResyncPeriod,
+				testContext.ResyncPeriod,
+				testContext.NumGCWorkers,
+				false,
+				true, // runL4Controller
+				false,
+				testContext.EnableDualStackNEG,
+				labels.PodLabelPropagationConfig{},
+				true,
+				false,
+				false,
+				false,
+				true,
+				tc.globalFlag, // includeDrainNodesL4Local
+				make(<-chan struct{}),
+				klog.TODO(),
+				testContext.NegMetrics,
+				metricscollector.FakeSyncerMetrics(),
+			)
+			if err != nil {
+				t.Fatalf("failed to create test controller: %v", err)
+			}
+			defer controller.stop()
+
+			svc := newTestILBService(controller, true, 80)
+			svc.Finalizers = []string{gce.ILBFinalizerV2}
+			if svc.Annotations == nil {
+				svc.Annotations = make(map[string]string)
+			}
+			for k, v := range tc.serviceAnnotations {
+				svc.Annotations[k] = v
+			}
+			portInfoMap := make(negtypes.PortInfoMap)
+			negUsage := metricscollector.NegServiceState{}
+			err = controller.mergeVmIpNEGsPortInfo(svc, types.NamespacedName{Namespace: svc.Namespace, Name: svc.Name}, portInfoMap, &negUsage, defaultNetwork)
+			if err != nil {
+				t.Fatalf("failed to mergeVmIpNEGsPortInfo: %v", err)
+			}
+
+			if len(portInfoMap) != 1 {
+				t.Fatalf("expected 1 port info, got %d", len(portInfoMap))
+			}
+
+			var portInfo negtypes.PortInfo
+			for _, v := range portInfoMap {
+				portInfo = v
+			}
+
+			if portInfo.IncludeDrainNodesL4Local != tc.expectIncludeDrain {
+				t.Errorf("expected IncludeDrainNodesL4Local to be %t, got %t", tc.expectIncludeDrain, portInfo.IncludeDrainNodesL4Local)
+			}
+		})
+	}
 }

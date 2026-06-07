@@ -240,7 +240,7 @@ func (manager *syncerManager) EnsureSyncers(namespace, name string, newPorts neg
 				&portInfo.NetworkInfo,
 				portInfo.L4LBType,
 				manager.negMetrics,
-				manager.includeDrainNodesL4Local,
+				portInfo.IncludeDrainNodesL4Local,
 			)
 			nonDefaultSubnetNEGNamer := manager.namer
 			if syncerKey.NegType == negtypes.VmIpEndpointType {
@@ -920,7 +920,7 @@ func (manager *syncerManager) getSyncerKey(namespace, name string, servicePortKe
 		NegType:                  networkEndpointType,
 		EpCalculatorMode:         calculatorMode,
 		L4LBType:                 portInfo.L4LBType,
-		IncludeDrainNodesL4Local: manager.includeDrainNodesL4Local,
+		IncludeDrainNodesL4Local: portInfo.IncludeDrainNodesL4Local,
 	}
 }
 
