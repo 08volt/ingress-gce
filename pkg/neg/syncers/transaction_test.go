@@ -2540,7 +2540,7 @@ func TestIsSubnetChange(t *testing.T) {
 			expectedResult:  false,
 		},
 
-		// In this case NEGs allready exist in secondary subnet previously. We assume that MSC was
+		// In this case NEGs already exist in secondary subnet previously. We assume that MSC was
 		// disabled after a controller update, so the controller should recognize it as a subnet change.
 		{
 			desc:            "subnet was deleted and MSC is disabled",
@@ -3136,7 +3136,7 @@ func TestEnableDegradedMode(t *testing.T) {
 	testCases := []struct {
 		desc                 string
 		modify               func(ts *transactionSyncer)
-		negName              string // to distinguish endpoints in differnt NEGs
+		negName              string // to distinguish endpoints in different NEGs
 		testEndpointSlices   []*discovery.EndpointSlice
 		expectedEndpoints    map[negtypes.NEGLocation]negtypes.NetworkEndpointSet
 		expectedInErrorState bool
@@ -3500,7 +3500,7 @@ func TestGetEndpointPodLabelMap(t *testing.T) {
 			},
 		},
 		{
-			desc: "Add endpoints in diferent zones",
+			desc: "Add endpoints in different zones",
 			input: func() (map[negtypes.NEGLocation]negtypes.NetworkEndpointSet, negtypes.EndpointPodMap) {
 				retSet := map[negtypes.NEGLocation]negtypes.NetworkEndpointSet{
 					{Zone: testZone1}: negtypes.NewNetworkEndpointSet().Union(endpointSet1),
@@ -3523,7 +3523,7 @@ func TestGetEndpointPodLabelMap(t *testing.T) {
 			},
 		},
 		{
-			desc: "Add endpoints in diferent zones with pod not found",
+			desc: "Add endpoints in different zones with pod not found",
 			input: func() (map[negtypes.NEGLocation]negtypes.NetworkEndpointSet, negtypes.EndpointPodMap) {
 				retSet := map[negtypes.NEGLocation]negtypes.NetworkEndpointSet{
 					{Zone: testZone1}: negtypes.NewNetworkEndpointSet().Union(endpointSet1),

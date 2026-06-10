@@ -1705,7 +1705,7 @@ func TestGarbageCollectTBDNegs(t *testing.T) {
 			if tc.expectCR && err != nil {
 				t.Errorf("failed to get neg cr: %s", err)
 			} else if !tc.expectCR && err == nil {
-				t.Error("expected no CR, but recieved no error")
+				t.Error("expected no CR, but received no error")
 			}
 
 			if updatedCR == nil {

@@ -1163,7 +1163,7 @@ func TestRetrieveExistingZoneNetworkEndpointMap(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			desc: "negs in the addtional subnet are deleted, and 2 negs in the default subnet with multiple endpoints",
+			desc: "negs in the additional subnet are deleted, and 2 negs in the default subnet with multiple endpoints",
 			mutate: func(cloud negtypes.NetworkEndpointGroupCloud) {
 				cloud.DeleteNetworkEndpointGroup(nonDefaultSubnetNegName, negtypes.TestZone1, meta.VersionGA, klog.TODO())
 				cloud.DeleteNetworkEndpointGroup(nonDefaultSubnetNegName, negtypes.TestZone2, meta.VersionGA, klog.TODO())

@@ -766,7 +766,7 @@ func TestNodePredicateForEndpointCalculatorMode(t *testing.T) {
 			zonegetter.PopulateFakeNodeInformer(nodeInformer, false)
 			zoneGetter, err := zonegetter.NewFakeZoneGetter(nodeInformer, zonegetter.FakeNodeTopologyInformer(), defaultTestSubnetURL, false)
 			if err != nil {
-				t.Errorf("failed to initalize zone getter: %v", err)
+				t.Errorf("failed to initialize zone getter: %v", err)
 			}
 			zones, err := zoneGetter.ListZones(predicate, klog.TODO())
 			if err != nil {

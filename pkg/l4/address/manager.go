@@ -128,7 +128,7 @@ func (m *Manager) HoldAddress() (string, IPAddressType, error) {
 		}
 	}
 
-	// Get and validate existing Address: user-specifed or default (orphaned)
+	// Get and validate existing Address: user-specified or default (orphaned)
 	addr, err := m.svc.GetRegionAddress(addressName, m.region)
 	if err != nil && !utils.IsNotFoundError(err) {
 		return "", IPAddrUndefined, err

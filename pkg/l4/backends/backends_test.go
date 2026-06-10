@@ -719,7 +719,7 @@ func TestBackendSvcEqual(t *testing.T) {
 		{
 			// ConnectionPersistenceOnUnhealthyBackends change is not supported yet
 			// that's why wantEqual = True. Change this case when the support starts.
-			desc: "The customer's update to ConnectionPersistenceOnUnhealthyBackends will not be overriden",
+			desc: "The customer's update to ConnectionPersistenceOnUnhealthyBackends will not be overridden",
 			oldBackendService: &composite.BackendService{
 				ConnectionTrackingPolicy: &composite.BackendServiceConnectionTrackingPolicy{
 					EnableStrongAffinity:                     false,

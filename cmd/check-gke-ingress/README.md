@@ -122,7 +122,7 @@ The output will be the same as checking all ingresses.
 
 ### Add new check rules
 There are four kinds of check functions defined: `ingressCheckFunc`, `serviceCheckFunc`, `backendConfigCheckFunc`, `frontendConfigCheckFunc`. 
-To add a new rule for those resources, create a check function accroding to the function type defined in [rule.go](app/ingress/rule.go), 
+To add a new rule for those resources, create a check function according to the function type defined in [rule.go](app/ingress/rule.go), 
 and add the new check rule function to the corresponding list defined in [ingress.go](app/ingress/ingress.go).
 
 To add new checks for resources other than `ingress`, `service`, `backendConfig` and `frontendConfig`, you will need to define new

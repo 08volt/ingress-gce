@@ -168,7 +168,7 @@ func CheckBackendConfigAnnotation(c *ServiceChecker) (string, string, string) {
 	return BackendConfigAnnotationCheck, report.Passed, fmt.Sprintf("BackendConfig annotation is valid in service %s/%s", c.namespace, c.name)
 }
 
-// CheckAppProtocolAnnotation check whether the protocal annotation specified
+// CheckAppProtocolAnnotation check whether the protocol annotation specified
 // in a service is in valid format and with valid protocols.
 func CheckAppProtocolAnnotation(c *ServiceChecker) (string, string, string) {
 	if c.service == nil {

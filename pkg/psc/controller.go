@@ -852,7 +852,7 @@ func detectUnsyncedFields(existingSA *ga.ServiceAttachment, updatedCR *sav1.Serv
 		}
 		knownUnsyncedFields = strings.Split(knownUnsyncedFieldsStr, ",")
 	} else {
-		// Init potentialy unsynced fields only on a first sync of existing SA by this controller version.
+		// Init potentially unsynced fields only on a first sync of existing SA by this controller version.
 		// (If annotation is missing, then this is a first sync).
 		knownUnsyncedFields = optionalFields
 	}

@@ -1731,17 +1731,17 @@ func TestGetDomainFromGABasePath(t *testing.T) {
 			want:     "https://www.compute.googleapis.com",
 		},
 		{
-			desc:     "arbitary path",
+			desc:     "arbitrary path",
 			basePath: "mycompute.mydomain.com/mypath/compute/v1",
 			want:     "mycompute.mydomain.com/mypath",
 		},
 		{
-			desc:     "arbitary path with trailing /",
+			desc:     "arbitrary path with trailing /",
 			basePath: "mycompute.mydomain.com/mypath/compute/v1/",
 			want:     "mycompute.mydomain.com/mypath",
 		},
 		{
-			desc:     "arbitary path without /v1 -- should return same string",
+			desc:     "arbitrary path without /v1 -- should return same string",
 			basePath: "mycompute.mydomain.com/mypath/compute",
 			want:     "mycompute.mydomain.com/mypath/compute",
 		},
