@@ -659,6 +659,22 @@ func TestNEGBindingManagerConflictResolution(t *testing.T) {
 		klog.TODO(),
 	)
 
+	// Simulate the controller's serialized worker: released NEGs re-enqueue waiting
+	// bindings, which are then reconciled asynchronously (non-blocking, like workqueue.Add).
+	m.enqueueBinding = func(key string) {
+		go func() {
+			obj, exists, getErr := negBindingLister.GetByKey(key)
+			if getErr != nil || !exists {
+				return
+			}
+			b, ok := obj.(*negbindingv1beta1.NetworkEndpointGroupBinding)
+			if !ok {
+				return
+			}
+			_ = m.EnsureSyncerForNEGBinding(b)
+		}()
+	}
+
 	// 1. Ensure B1. B1 should acquire neg-1.
 	err := m.EnsureSyncerForNEGBinding(b1)
 	if err != nil {

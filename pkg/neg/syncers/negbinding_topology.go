@@ -18,12 +18,12 @@ package syncers
 
 import (
 	"fmt"
+	"sync"
 
 	nodetopologyv1 "github.com/GoogleCloudPlatform/gke-networking-api/apis/nodetopology/v1"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/client-go/tools/cache"
 	negbindingv1beta1 "k8s.io/ingress-gce/pkg/apis/negbinding/v1beta1"
 	"k8s.io/ingress-gce/pkg/neg/types/shared"
 	"k8s.io/ingress-gce/pkg/network"
@@ -31,87 +31,88 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// negOwnershipRegistry is a pure data structure tracking exclusive ownership of
+// NEG names across NEGBinding CR syncers. It performs no callbacks or goroutine
+// spawning; ReleaseAllOwnedExcept returns the released names so the caller can
+// re-enqueue any bindings waiting to acquire them.
 type negOwnershipRegistry interface {
 	Acquire(negName string, owner string) (bool, string)
-	ReleaseAllOwnedExcept(owner string, keep sets.Set[string])
+	ReleaseAllOwnedExcept(owner string, keep sets.Set[string]) []string
 }
 
 // NEGBindingTopologyProvider provides subnets and zones where NEGs should be managed
-// based on NetworkEndpointGroupBinding CR
+// based on NetworkEndpointGroupBinding CR.
+//
+// Ownership is refreshed out-of-band via RefreshOwnership (called by the manager on
+// its serialized worker), which caches the owned NEG refs. The List* getters are
+// read-only projections of that cache and perform no ownership mutation.
 type NEGBindingTopologyProvider struct {
-	negBindingName   string
-	namespace        string
-	negBindingLister cache.Indexer
-	defaultSubnetID  *cloud.ResourceID
-	registry         negOwnershipRegistry
+	ownerKey        string
+	defaultSubnetID *cloud.ResourceID
+	registry        negOwnershipRegistry
+
+	// mu guards ownedRefs, which is written by RefreshOwnership (manager goroutine)
+	// and read by the List* getters (syncer goroutine).
+	mu        sync.Mutex
+	ownedRefs []negbindingv1beta1.SpecNegRef
 }
 
 // NewNEGBindingTopologyProvider constructs a new NEGBindingTopologyProvider
-func NewNEGBindingTopologyProvider(namespace, negBindingName string, negBindingLister cache.Indexer, defaultSubnetURL string, registry negOwnershipRegistry) (*NEGBindingTopologyProvider, error) {
+func NewNEGBindingTopologyProvider(namespace, negBindingName, defaultSubnetURL string, registry negOwnershipRegistry) (*NEGBindingTopologyProvider, error) {
 	defaultSubnetID, err := cloud.ParseResourceURL(defaultSubnetURL)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse default subnetwork URL %q: %w", defaultSubnetURL, err)
 	}
 
 	return &NEGBindingTopologyProvider{
-		negBindingName:   negBindingName,
-		namespace:        namespace,
-		negBindingLister: negBindingLister,
-		defaultSubnetID:  defaultSubnetID,
-		registry:         registry,
+		ownerKey:        fmt.Sprintf("%s/%s", namespace, negBindingName),
+		defaultSubnetID: defaultSubnetID,
+		registry:        registry,
 	}, nil
 }
 
-func (p *NEGBindingTopologyProvider) getBinding() (*negbindingv1beta1.NetworkEndpointGroupBinding, error) {
-	key := fmt.Sprintf("%s/%s", p.namespace, p.negBindingName)
-	obj, exists, err := p.negBindingLister.GetByKey(key)
-	if err != nil {
-		return nil, fmt.Errorf("error getting negbinding from cache: %w", err)
-	}
-	if !exists {
-		return nil, fmt.Errorf("negbinding %s is not in store", key)
-	}
-	binding, ok := obj.(*negbindingv1beta1.NetworkEndpointGroupBinding)
-	if !ok {
-		return nil, fmt.Errorf("cached object %q is of type %T, expected *NetworkEndpointGroupBinding", key, obj)
-	}
-	return binding, nil
-}
-
-// acquireSpecNEGRefs tries to acquire ownership of the NEG names from NEGBinding.Spec.
-func (p *NEGBindingTopologyProvider) acquireSpecNEGRefs(binding *negbindingv1beta1.NetworkEndpointGroupBinding, logger klog.Logger) []negbindingv1beta1.SpecNegRef {
+// RefreshOwnership releases the NEG names no longer desired by the binding, acquires
+// the currently desired ones, and caches the successfully owned refs. It returns the
+// names of NEGs that were released so the caller can re-enqueue any bindings waiting
+// to acquire them.
+func (p *NEGBindingTopologyProvider) RefreshOwnership(binding *negbindingv1beta1.NetworkEndpointGroupBinding, logger klog.Logger) []string {
 	keepNEGs := sets.New[string]()
 	for _, ref := range binding.Spec.NetworkEndpointGroups {
 		keepNEGs.Insert(ref.Name)
 	}
 
-	ownerKey := fmt.Sprintf("%s/%s", p.namespace, p.negBindingName)
-	p.registry.ReleaseAllOwnedExcept(ownerKey, keepNEGs)
+	released := p.registry.ReleaseAllOwnedExcept(p.ownerKey, keepNEGs)
 
 	var acquiredRefs []negbindingv1beta1.SpecNegRef
 	for _, ref := range binding.Spec.NetworkEndpointGroups {
-		acquired, owner := p.registry.Acquire(ref.Name, ownerKey)
+		acquired, owner := p.registry.Acquire(ref.Name, p.ownerKey)
 		if acquired {
 			acquiredRefs = append(acquiredRefs, ref)
 		} else {
-			logger.Info("NEG name is owned by another binding, skipping", "negName", ref.Name, "owner", ownerKey, "currentOwner", owner)
+			logger.Info("NEG name is owned by another binding, skipping", "negName", ref.Name, "owner", p.ownerKey, "currentOwner", owner)
 		}
 	}
-	return acquiredRefs
+
+	p.mu.Lock()
+	p.ownedRefs = acquiredRefs
+	p.mu.Unlock()
+	return released
 }
 
-// ListSubnetsInDefaultNetwork returns the list of subnets declared inside the NegBinding CR Spec.
-func (p *NEGBindingTopologyProvider) ListSubnetsInDefaultNetwork(logger klog.Logger) []nodetopologyv1.SubnetConfig {
-	binding, err := p.getBinding()
-	if err != nil {
-		logger.Error(err, "Failed to get NegBinding from store", "namespace", p.namespace, "negBindingName", p.negBindingName)
-		return nil
-	}
+// ownedRefsSnapshot returns the currently owned NEG refs computed by the last
+// RefreshOwnership call.
+func (p *NEGBindingTopologyProvider) ownedRefsSnapshot() []negbindingv1beta1.SpecNegRef {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.ownedRefs
+}
 
-	// Return only subnets where NEGs are owned
+// ListSubnetsInDefaultNetwork returns the list of subnets of the owned NEGs declared
+// inside the NegBinding CR Spec.
+func (p *NEGBindingTopologyProvider) ListSubnetsInDefaultNetwork(logger klog.Logger) []nodetopologyv1.SubnetConfig {
+	// Return only subnets where NEGs are owned.
 	subnets := sets.New[string]()
-	ownedSpecRefs := p.acquireSpecNEGRefs(binding, logger)
-	for _, ref := range ownedSpecRefs {
+	for _, ref := range p.ownedRefsSnapshot() {
 		subnets.Insert(ref.Subnet)
 	}
 
@@ -130,7 +131,8 @@ func (p *NEGBindingTopologyProvider) ListSubnetsInDefaultNetwork(logger klog.Log
 	return configs
 }
 
-// ListZonesPerSubnet returns a map of subnet to zones defined inside the NegBinding CR Spec.
+// ListZonesPerSubnet returns a map of subnet to zones of the owned NEGs defined inside
+// the NegBinding CR Spec.
 // NEGBinding contains explicit locations (subnet + zone pairs), where NEG controller is expected to
 // manage NEGs ignoring if any endpoints available there. Therefore ignoring filtering.
 func (p *NEGBindingTopologyProvider) ListZonesPerSubnet(_ zonegetter.Filter, networkInfo network.NetworkInfo, logger klog.Logger) (shared.ZonesPerSubnetMap, error) {
@@ -138,15 +140,9 @@ func (p *NEGBindingTopologyProvider) ListZonesPerSubnet(_ zonegetter.Filter, net
 		return nil, fmt.Errorf("NEGBinding does not support multi-network mode")
 	}
 
-	binding, err := p.getBinding()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get NegBinding from store: %w", err)
-	}
-
-	// Return only zones of subnets, where NEGs are owned
-	ownedSpecRefs := p.acquireSpecNEGRefs(binding, logger)
+	// Return only zones of subnets, where NEGs are owned.
 	zonesPerSubnet := make(shared.ZonesPerSubnetMap)
-	for _, ref := range ownedSpecRefs {
+	for _, ref := range p.ownedRefsSnapshot() {
 		zonesPerSubnet[ref.Subnet] = sets.New(ref.Zones...)
 	}
 	return zonesPerSubnet, nil

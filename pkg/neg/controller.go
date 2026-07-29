@@ -360,6 +360,10 @@ func NewController(
 	}
 	if enableNEGBinding {
 		negController.negBindingQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "neg_binding_queue")
+		// Wire the manager's failover re-enqueue onto the serialized binding worker queue.
+		negBindingMgr.enqueueBinding = func(key string) {
+			negController.negBindingQueue.Add(key)
+		}
 	}
 	if enableMultiSubnetClusterPhase1 {
 		negController.nodeTopologyQueue = workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), "neg_node_topology_queue")
