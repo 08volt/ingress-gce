@@ -449,6 +449,240 @@ func TestGetSubsetPerZoneMultinetwork(t *testing.T) {
 	}
 }
 
+func TestGetSubsetPerZoneDualStackAndMultiAddress(t *testing.T) {
+	testCases := []struct {
+		description      string
+		nodesMap         map[string][]*nodeWithSubnet
+		svcKey           string
+		networkInfo      network.NetworkInfo
+		enableIPv6Flag   bool
+		expectedNodesMap map[types.NEGLocation]map[string]types.NetworkEndpoint
+	}{
+		{
+			description: "default network, dual-stack node with IPv6 first in addresses, IPv6 NEG disabled",
+			nodesMap: map[string][]*nodeWithSubnet{
+				"zone1": {
+					makeNodeWithAddresses("n1_1", "zone1", defaultTestSubnet, []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "2001:db8:1::1"},
+						{Type: v1.NodeInternalIP, Address: "10.0.0.1"},
+					}),
+				},
+			},
+			svcKey: "svc123",
+			networkInfo: network.NetworkInfo{
+				IsDefault:     true,
+				SubnetworkURL: defaultTestSubnetURL,
+			},
+			enableIPv6Flag: false,
+			expectedNodesMap: map[types.NEGLocation]map[string]types.NetworkEndpoint{
+				{Zone: "zone1", Subnet: defaultTestSubnet}: {"n1_1": {Node: "n1_1", IP: "10.0.0.1"}},
+			},
+		},
+		{
+			description: "default network, dual-stack node with IPv6 first in addresses, IPv6 NEG enabled",
+			nodesMap: map[string][]*nodeWithSubnet{
+				"zone1": {
+					makeNodeWithAddresses("n1_1", "zone1", defaultTestSubnet, []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "2001:db8:1::1"},
+						{Type: v1.NodeInternalIP, Address: "10.0.0.1"},
+					}),
+				},
+			},
+			svcKey: "svc123",
+			networkInfo: network.NetworkInfo{
+				IsDefault:     true,
+				SubnetworkURL: defaultTestSubnetURL,
+			},
+			enableIPv6Flag: true,
+			expectedNodesMap: map[types.NEGLocation]map[string]types.NetworkEndpoint{
+				{Zone: "zone1", Subnet: defaultTestSubnet}: {"n1_1": {Node: "n1_1", IP: "10.0.0.1", IPv6: "2001:db8:1::1"}},
+			},
+		},
+		{
+			description: "default network, dual-stack node with IPv4 first in addresses, IPv6 NEG enabled",
+			nodesMap: map[string][]*nodeWithSubnet{
+				"zone1": {
+					makeNodeWithAddresses("n1_1", "zone1", defaultTestSubnet, []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "10.0.0.1"},
+						{Type: v1.NodeInternalIP, Address: "2001:db8:1::1"},
+					}),
+				},
+			},
+			svcKey: "svc123",
+			networkInfo: network.NetworkInfo{
+				IsDefault:     true,
+				SubnetworkURL: defaultTestSubnetURL,
+			},
+			enableIPv6Flag: true,
+			expectedNodesMap: map[types.NEGLocation]map[string]types.NetworkEndpoint{
+				{Zone: "zone1", Subnet: defaultTestSubnet}: {"n1_1": {Node: "n1_1", IP: "10.0.0.1", IPv6: "2001:db8:1::1"}},
+			},
+		},
+		{
+			description: "default network, IPv6-only node, IPv6 NEG disabled -> skipped",
+			nodesMap: map[string][]*nodeWithSubnet{
+				"zone1": {
+					makeNodeWithAddresses("n1_1", "zone1", defaultTestSubnet, []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "2001:db8:1::1"},
+					}),
+				},
+			},
+			svcKey: "svc123",
+			networkInfo: network.NetworkInfo{
+				IsDefault:     true,
+				SubnetworkURL: defaultTestSubnetURL,
+			},
+			enableIPv6Flag: false,
+			expectedNodesMap: map[types.NEGLocation]map[string]types.NetworkEndpoint{
+				{Zone: "zone1", Subnet: defaultTestSubnet}: {},
+			},
+		},
+		{
+			description: "default network, IPv6-only node, IPv6 NEG enabled -> populated with IPv6",
+			nodesMap: map[string][]*nodeWithSubnet{
+				"zone1": {
+					makeNodeWithAddresses("n1_1", "zone1", defaultTestSubnet, []v1.NodeAddress{
+						{Type: v1.NodeInternalIP, Address: "2001:db8:1::1"},
+					}),
+				},
+			},
+			svcKey: "svc123",
+			networkInfo: network.NetworkInfo{
+				IsDefault:     true,
+				SubnetworkURL: defaultTestSubnetURL,
+			},
+			enableIPv6Flag: true,
+			expectedNodesMap: map[types.NEGLocation]map[string]types.NetworkEndpoint{
+				{Zone: "zone1", Subnet: defaultTestSubnet}: {"n1_1": {Node: "n1_1", IPv6: "2001:db8:1::1"}},
+			},
+		},
+		{
+			description: "non-default network, dual-stack node with IPv6 first in north-interfaces, IPv6 NEG disabled",
+			nodesMap: map[string][]*nodeWithSubnet{
+				"zone1": {
+					makeNodeWithMultiInterface("n1_1", "zone1", defaultTestSubnet, networkv1.NorthInterfacesAnnotation{
+						{Network: "net1", IpAddress: "2001:db8:1::1"},
+						{Network: "net1", IpAddress: "172.16.0.1"},
+					}),
+				},
+			},
+			svcKey: "svc123",
+			networkInfo: network.NetworkInfo{
+				IsDefault:     false,
+				K8sNetwork:    "net1",
+				SubnetworkURL: defaultTestSubnetURL,
+			},
+			enableIPv6Flag: false,
+			expectedNodesMap: map[types.NEGLocation]map[string]types.NetworkEndpoint{
+				{Zone: "zone1", Subnet: defaultTestSubnet}: {"n1_1": {Node: "n1_1", IP: "172.16.0.1"}},
+			},
+		},
+		{
+			description: "non-default network, dual-stack node with IPv6 first in north-interfaces, IPv6 NEG enabled",
+			nodesMap: map[string][]*nodeWithSubnet{
+				"zone1": {
+					makeNodeWithMultiInterface("n1_1", "zone1", defaultTestSubnet, networkv1.NorthInterfacesAnnotation{
+						{Network: "net1", IpAddress: "2001:db8:1::1"},
+						{Network: "net1", IpAddress: "172.16.0.1"},
+					}),
+				},
+			},
+			svcKey: "svc123",
+			networkInfo: network.NetworkInfo{
+				IsDefault:     false,
+				K8sNetwork:    "net1",
+				SubnetworkURL: defaultTestSubnetURL,
+			},
+			enableIPv6Flag: true,
+			expectedNodesMap: map[types.NEGLocation]map[string]types.NetworkEndpoint{
+				{Zone: "zone1", Subnet: defaultTestSubnet}: {"n1_1": {Node: "n1_1", IP: "172.16.0.1", IPv6: "2001:db8:1::1"}},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			oldFlags := flags.F.EnableIPv6NodeNEGEndpoints
+			flags.F.EnableIPv6NodeNEGEndpoints = tc.enableIPv6Flag
+			defer func() {
+				flags.F.EnableIPv6NodeNEGEndpoints = oldFlags
+			}()
+
+			subsetMap, err := getSubsetPerZone(tc.nodesMap, maxSubsetSizeLocal, tc.svcKey, nil, klog.TODO(), &tc.networkInfo)
+			if err != nil {
+				t.Fatalf("Failed to get subset: %v", err)
+			}
+			for zoneAndSubnet, wantNodesAndEndpoints := range tc.expectedNodesMap {
+				gotSet, ok := subsetMap[zoneAndSubnet]
+				if !ok {
+					t.Errorf("Expected NEGLocation %s not found in result", zoneAndSubnet)
+					continue
+				}
+
+				if len(wantNodesAndEndpoints) == 0 && gotSet.Len() != 0 {
+					t.Errorf("Expected empty set for %s, got: %+v", zoneAndSubnet, gotSet.List())
+				}
+
+				for node, wantEndpoint := range wantNodesAndEndpoints {
+					if !gotSet.Has(wantEndpoint) {
+						found := false
+						for _, gotEndpoint := range gotSet.List() {
+							if gotEndpoint.Node == node {
+								found = true
+								if gotEndpoint.IP != wantEndpoint.IP || gotEndpoint.IPv6 != wantEndpoint.IPv6 {
+									t.Errorf("Node %s in %s: Expected endpoint %+v, but got %+v", node, zoneAndSubnet, wantEndpoint, gotEndpoint)
+								}
+								break
+							}
+						}
+						if !found {
+							t.Errorf("Node %s in %s was expected but not found in endpoints: %+v", node, zoneAndSubnet, gotSet.List())
+						}
+					}
+				}
+			}
+		})
+	}
+}
+
+func makeNodeWithAddresses(name, zone, subnet string, addresses []v1.NodeAddress) *nodeWithSubnet {
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   name,
+			Labels: map[string]string{utils.LabelNodeSubnet: subnet},
+		},
+		Spec: v1.NodeSpec{
+			ProviderID: fmt.Sprintf("gce://testProject/%s/%s", zone, name),
+			PodCIDR:    "10.0.0.0/24",
+		},
+		Status: v1.NodeStatus{
+			Addresses: addresses,
+		},
+	}
+	return newNodeWithSubnet(node, subnet)
+}
+
+func makeNodeWithMultiInterface(name, zone, subnet string, northInterfaces networkv1.NorthInterfacesAnnotation) *nodeWithSubnet {
+	node := &v1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Annotations: map[string]string{},
+			Labels:      map[string]string{utils.LabelNodeSubnet: subnet},
+		},
+		Spec: v1.NodeSpec{
+			ProviderID: fmt.Sprintf("gce://testProject/%s/%s", zone, name),
+			PodCIDR:    "10.0.0.0/24",
+		},
+	}
+	if len(northInterfaces) > 0 {
+		annotation, err := networkv1.MarshalNorthInterfacesAnnotation(northInterfaces)
+		if err == nil {
+			node.ObjectMeta.Annotations[networkv1.NorthInterfacesAnnotationKey] = annotation
+		}
+	}
+	return newNodeWithSubnet(node, subnet)
+}
+
 func makeNodes(startIndex, count int) []*nodeWithSubnet {
 	return makeNodesInSubnet(startIndex, count, defaultTestSubnet)
 }

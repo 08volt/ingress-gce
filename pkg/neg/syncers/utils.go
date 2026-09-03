@@ -734,7 +734,7 @@ func retrieveExistingZoneNetworkEndpointMap(subnetToNegMapping map[string]string
 				if ne.NetworkEndpoint.Port != 0 {
 					newNE.Port = strconv.FormatInt(ne.NetworkEndpoint.Port, 10)
 				}
-				if enableDualStackNEG {
+				if enableDualStackNEG || flags.F.EnableIPv6NodeNEGEndpoints || ne.NetworkEndpoint.Ipv6Address != "" {
 					newNE.IPv6 = parseIPAddress(ne.NetworkEndpoint.Ipv6Address)
 				}
 				zoneNetworkEndpointMap[loc].Insert(newNE)

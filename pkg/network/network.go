@@ -28,6 +28,7 @@ import (
 	"k8s.io/client-go/tools/cache"
 	l4utils "k8s.io/ingress-gce/pkg/l4/utils"
 	"k8s.io/klog/v2"
+	netutils "k8s.io/utils/net"
 )
 
 const (
@@ -214,23 +215,41 @@ func subnetworkURL(cloudProvider CloudNetworkProvider, subnetwork string) string
 	return cloud.SelfLink(meta.VersionGA, cloudProvider.NetworkProjectID(), "subnetworks", key)
 }
 
-// GetNodeIPForNetwork retrieves the IP of the interface of the node connected to the network.
+// GetNodeIPsForNetwork retrieves the IPv4 and IPv6 addresses of the interface of the node connected to the network.
 // The addresses come from the 'networking.gke.io/north-interfaces' annotation.
-func GetNodeIPForNetwork(node *apiv1.Node, network string) string {
+func GetNodeIPsForNetwork(node *apiv1.Node, network string) (ipv4, ipv6 string) {
+	if node == nil {
+		return "", ""
+	}
 	northInterfacesAnnotation, ok := node.Annotations[networkv1.NorthInterfacesAnnotationKey]
 	if !ok || northInterfacesAnnotation == "" {
-		return ""
+		return "", ""
 	}
 	northInterfaces, err := networkv1.ParseNorthInterfacesAnnotation(northInterfacesAnnotation)
 	if err != nil {
-		return ""
+		return "", ""
 	}
 	for _, northInterface := range northInterfaces {
 		if northInterface.Network == network {
-			return northInterface.IpAddress
+			if ipv4 == "" && netutils.IsIPv4String(northInterface.IpAddress) {
+				ipv4 = northInterface.IpAddress
+			} else if ipv6 == "" && netutils.IsIPv6String(northInterface.IpAddress) {
+				ipv6 = northInterface.IpAddress
+			}
 		}
 	}
-	return ""
+	return ipv4, ipv6
+}
+
+// GetNodeIPForNetwork retrieves the primary IP of the interface of the node connected to the network.
+// It prefers IPv4 if available, falling back to IPv6.
+// The addresses come from the 'networking.gke.io/north-interfaces' annotation.
+func GetNodeIPForNetwork(node *apiv1.Node, network string) string {
+	ipv4, ipv6 := GetNodeIPsForNetwork(node, network)
+	if ipv4 != "" {
+		return ipv4
+	}
+	return ipv6
 }
 
 type CloudNetworkProvider interface {

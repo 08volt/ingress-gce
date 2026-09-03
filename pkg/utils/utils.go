@@ -42,6 +42,7 @@ import (
 	"k8s.io/ingress-gce/pkg/utils/common"
 	"k8s.io/ingress-gce/pkg/utils/slice"
 	"k8s.io/klog/v2"
+	netutils "k8s.io/utils/net"
 )
 
 const (
@@ -398,13 +399,38 @@ func NodeIsReady(node *api_v1.Node) bool {
 	return false
 }
 
-// GetNodePrimaryIP returns a primary internal IP address of the node.
-func GetNodePrimaryIP(inputNode *api_v1.Node, logger klog.Logger) string {
-	ip, err := getPreferredNodeAddress(inputNode, []api_v1.NodeAddressType{api_v1.NodeInternalIP})
-	if err != nil {
-		logger.Error(err, "Failed to get IP address for node", "nodeName", inputNode.Name)
+// GetNodeInternalIPs extracts the primary IPv4 and IPv6 internal addresses of a node.
+func GetNodeInternalIPs(inputNode *api_v1.Node) (ipv4, ipv6 string) {
+	if inputNode == nil {
+		return "", ""
 	}
-	return ip
+	for _, address := range inputNode.Status.Addresses {
+		if address.Type == api_v1.NodeInternalIP {
+			if ipv4 == "" && netutils.IsIPv4String(address.Address) {
+				ipv4 = address.Address
+			} else if ipv6 == "" && netutils.IsIPv6String(address.Address) {
+				ipv6 = address.Address
+			}
+		}
+	}
+	return ipv4, ipv6
+}
+
+// GetNodePrimaryIP returns a primary internal IP address of the node.
+// It prefers IPv4 if available, falling back to IPv6.
+func GetNodePrimaryIP(inputNode *api_v1.Node, logger klog.Logger) string {
+	if inputNode == nil {
+		return ""
+	}
+	ipv4, ipv6 := GetNodeInternalIPs(inputNode)
+	if ipv4 != "" {
+		return ipv4
+	}
+	if ipv6 != "" {
+		return ipv6
+	}
+	logger.Error(fmt.Errorf("no matching node IP"), "Failed to get IP address for node", "nodeName", inputNode.Name)
+	return ""
 }
 
 // getPreferredNodeAddress returns the address of the provided node, using the provided preference order.

@@ -216,11 +216,11 @@ func getSubsetPerZone(nodesPerZone map[string][]*nodeWithSubnet, totalLimit int,
 		}
 		subset := pickSubsetsMinRemovals(nodesPerZone[zone.Name], svcID, subsetSize, currentList)
 		for _, nodeAndSubnet := range subset {
-			var ip string
+			var nodeIPv4, nodeIPv6 string
 			if !networkInfo.IsDefault {
-				ip = network.GetNodeIPForNetwork(nodeAndSubnet.node, networkInfo.K8sNetwork)
+				nodeIPv4, nodeIPv6 = network.GetNodeIPsForNetwork(nodeAndSubnet.node, networkInfo.K8sNetwork)
 			} else {
-				ip = utils.GetNodePrimaryIP(nodeAndSubnet.node, logger)
+				nodeIPv4, nodeIPv6 = utils.GetNodeInternalIPs(nodeAndSubnet.node)
 			}
 			egi := negtypes.NEGLocation{Zone: zone.Name, Subnet: nodeAndSubnet.subnet}
 			if _, ok := result[egi]; !ok {
@@ -229,15 +229,25 @@ func getSubsetPerZone(nodesPerZone map[string][]*nodeWithSubnet, totalLimit int,
 
 			newEndpoint := negtypes.NetworkEndpoint{Node: nodeAndSubnet.node.Name}
 
-			if flags.F.EnableIPv6NodeNEGEndpoints && net.IsIPv6String(ip) {
-				// Convert all addresses to a standard form as per rfc5952 to prevent
-				// accidental diffs resulting from different formats.
-				newEndpoint.IPv6 = parseIPAddress(ip)
-			} else if net.IsIPv4String(ip) {
-				newEndpoint.IP = ip
+			if flags.F.EnableIPv6NodeNEGEndpoints {
+				if nodeIPv6 != "" && net.IsIPv6String(nodeIPv6) {
+					// Convert all addresses to a standard form as per rfc5952 to prevent
+					// accidental diffs resulting from different formats.
+					newEndpoint.IPv6 = parseIPAddress(nodeIPv6)
+				}
+				if nodeIPv4 != "" && net.IsIPv4String(nodeIPv4) {
+					newEndpoint.IP = nodeIPv4
+				}
+				if newEndpoint.IP == "" && newEndpoint.IPv6 == "" {
+					// Skipping invalid IPs prevents sending malformed data to the Cloud API, which would result in errors.
+					logger.Error(nil, "Skipping node with no valid IP address", "node", nodeAndSubnet.node.Name)
+					continue
+				}
+			} else if nodeIPv4 != "" && net.IsIPv4String(nodeIPv4) {
+				newEndpoint.IP = nodeIPv4
 			} else {
 				// Skipping invalid IPs prevents sending malformed data to the Cloud API, which would result in errors.
-				logger.Error(nil, "Skipping invalid IP address", "ip", ip, "node", nodeAndSubnet.node.Name)
+				logger.Error(nil, "Skipping node with no valid IPv4 address", "node", nodeAndSubnet.node.Name)
 				continue
 			}
 
