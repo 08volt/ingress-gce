@@ -26,6 +26,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/ingress-gce/pkg/utils/consistency"
+
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud"
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
 	computebeta "google.golang.org/api/compute/v0.beta"
@@ -1559,7 +1561,7 @@ func TestStandaloneNEGLBSync(t *testing.T) {
 				c.SvcNegClient.NetworkingV1beta1().ServiceNetworkEndpointGroups(svcneg.Namespace).Create(context.TODO(), svcneg, metav1.CreateOptions{})
 			}
 
-			lc := NewStandaloneNEGLBController(c, stopCh, klog.TODO())
+			lc := NewStandaloneNEGLBController(c, stopCh, klog.TODO(), consistency.NewNoopConsistencyStore())
 
 			// Add service to informer
 			c.ServiceInformer.GetIndexer().Add(tc.svc)
@@ -1781,7 +1783,7 @@ func setupControllerContext(t *testing.T) (*fake.Clientset, *gce.Cloud, *Standal
 	}
 	c.L4Namer = l4Namer
 
-	lc := NewStandaloneNEGLBController(c, stopCh, klog.TODO())
+	lc := NewStandaloneNEGLBController(c, stopCh, klog.TODO(), consistency.NewNoopConsistencyStore())
 	return kubeClient, fakeGCE, lc, stopCh
 }
 
@@ -2570,5 +2572,42 @@ func TestGetServiceNEGLinks_CustomNEGName(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestStandaloneNEGSyncStallsUntilCacheIsConsistent verifies that the sync
+// stalls while the informer has not observed a recorded write, resumes once
+// it has, and that the record is dropped when the informer observes the
+// deletion of the service.
+func TestStandaloneNEGSyncStallsUntilCacheIsConsistent(t *testing.T) {
+	_, _, lc, stopCh := setupControllerContext(t)
+	defer close(stopCh)
+
+	// The informer has observed ResourceVersion 100.
+	store, getter := newTestConsistencyStore("100")
+	lc.consistencyStore = store
+
+	svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "test-ns", Name: "test-svc", UID: "test-uid"}}
+	key := getKeyForSvc(svc, t)
+
+	// A status write whose ResourceVersion the informer has not observed.
+	store.WroteAt(serviceRef(svc.Namespace, svc.Name), svc.UID, "150")
+	if err := lc.sync(key, klog.TODO()); !consistency.IsStall(err) {
+		t.Fatalf("sync(%s) before the informer observed the write = %v, want a consistency stall", key, err)
+	}
+
+	// The service is not in the informer cache, so once the informer has
+	// caught up the sync has nothing to do.
+	getter.SetRV("150")
+	if err := lc.sync(key, klog.TODO()); err != nil {
+		t.Fatalf("sync(%s) after the informer observed the write = %v, want nil", key, err)
+	}
+
+	// The informer observing the deletion drops the record, so a lagging
+	// informer no longer stalls this key.
+	clearServiceRecord(store, svc)
+	getter.SetRV("100")
+	if err := lc.sync(key, klog.TODO()); err != nil {
+		t.Fatalf("sync(%s) after the service was deleted = %v, want nil", key, err)
 	}
 }

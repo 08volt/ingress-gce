@@ -6,7 +6,10 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/ingress-gce/pkg/utils/common"
+	"k8s.io/ingress-gce/pkg/utils/consistency"
 )
 
 func TestFinalizerWasRemovedUnexpectedly(t *testing.T) {
@@ -444,5 +447,61 @@ func TestMergeConditions_Sorting(t *testing.T) {
 		if cond.Type != expectedOrder[i] {
 			t.Errorf("At index %d: got Type %q, expected %q", i, cond.Type, expectedOrder[i])
 		}
+	}
+}
+
+// newTestConsistencyStore returns a real ConsistencyStore for services, wired
+// to a fake informer store whose ResourceVersion the test controls.
+func newTestConsistencyStore(rv string) (consistency.ConsistencyStore, *consistency.FakeRVGetter) {
+	getter := consistency.NewFakeRVGetter(rv)
+	store := consistency.NewConsistencyStore(map[schema.GroupResource]consistency.LastSyncRVGetter{servicesGroupResource: getter})
+	return store, getter
+}
+
+// TestClearServiceRecord covers the handler of the informer delete event:
+// the plain object, the tombstone an informer delivers when the final state
+// is unknown, and the UID that keeps a deletion event for an old incarnation
+// from dropping the record of a service recreated since.
+func TestClearServiceRecord(t *testing.T) {
+	svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "test-ns", Name: "test-svc", UID: "test-uid"}}
+	ref := serviceRef(svc.Namespace, svc.Name)
+
+	for _, tc := range []struct {
+		desc        string
+		deleted     interface{}
+		wantCleared bool
+	}{
+		{
+			desc:        "service",
+			deleted:     svc,
+			wantCleared: true,
+		},
+		{
+			desc:        "tombstone",
+			deleted:     cache.DeletedFinalStateUnknown{Key: "test-ns/test-svc", Obj: svc},
+			wantCleared: true,
+		},
+		{
+			desc:        "old incarnation",
+			deleted:     &v1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: "test-ns", Name: "test-svc", UID: "old-uid"}},
+			wantCleared: false,
+		},
+		{
+			desc:        "unexpected type",
+			deleted:     "not-a-service",
+			wantCleared: false,
+		},
+	} {
+		t.Run(tc.desc, func(t *testing.T) {
+			// A write at 150 that the informer, at 100, has not observed.
+			store, _ := newTestConsistencyStore("100")
+			store.WroteAt(ref, svc.UID, "150")
+
+			clearServiceRecord(store, tc.deleted)
+
+			if gotCleared := store.EnsureReady(ref) == nil; gotCleared != tc.wantCleared {
+				t.Errorf("clearServiceRecord(store, %T): record cleared = %t, want %t", tc.deleted, gotCleared, tc.wantCleared)
+			}
+		})
 	}
 }
