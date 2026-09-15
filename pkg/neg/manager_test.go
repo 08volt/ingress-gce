@@ -37,6 +37,7 @@ import (
 
 	apiv1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -57,6 +58,7 @@ import (
 	svcnegclient "k8s.io/ingress-gce/pkg/svcneg/client/clientset/versioned"
 	negfake "k8s.io/ingress-gce/pkg/svcneg/client/clientset/versioned/fake"
 	"k8s.io/ingress-gce/pkg/utils/common"
+	"k8s.io/ingress-gce/pkg/utils/consistency"
 	namer_util "k8s.io/ingress-gce/pkg/utils/namer"
 	"k8s.io/ingress-gce/pkg/utils/zonegetter"
 )
@@ -121,6 +123,7 @@ func NewTestSyncerManager(kubeClient kubernetes.Interface) (*syncerManager, *gce
 		klog.TODO(),
 		metrics.FakeNegMetrics(),
 		false,
+		consistency.NewNoopConsistencyStore(),
 	)
 	return manager, testContext.Cloud, testContext, nil
 }
@@ -2336,6 +2339,7 @@ func TestGetSyncerKeyIncludeDrainNodesL4Local(t *testing.T) {
 			klog.TODO(),
 			metrics.FakeNegMetrics(),
 			wantDrain,
+			consistency.NewNoopConsistencyStore(),
 		)
 
 		key := manager.getSyncerKey("ns", "svc", portKey, portInfo)
@@ -2701,5 +2705,68 @@ func TestEnsureDeleteNetworkEndpointGroupDoesNotDeleteForeignNEG(t *testing.T) {
 				t.Errorf("NEG deleted = %v, want %v", deleted, tc.expectDelete)
 			}
 		})
+	}
+}
+
+// newSvcNegConsistencyStore returns a real ConsistencyStore for SvcNeg CRs,
+// wired to a fake informer store whose ResourceVersion the test controls.
+func newSvcNegConsistencyStore(rv string) (consistency.ConsistencyStore, *consistency.FakeRVGetter) {
+	getter := consistency.NewFakeRVGetter(rv)
+	store := consistency.NewConsistencyStore(map[schema.GroupResource]consistency.LastSyncRVGetter{
+		negtypes.SvcNegGroupResource: getter,
+	})
+	return store, getter
+}
+
+// TestEnsureSvcNegCRStallsOnStaleCache covers the gate in ensureSvcNegCR:
+// while the informer has not observed a write this controller made to the
+// CR, it must report a consistency stall rather than decide create-vs-update
+// from a stale read, and it must proceed once the informer has caught up.
+func TestEnsureSvcNegCRStallsOnStaleCache(t *testing.T) {
+	t.Parallel()
+
+	const (
+		namespace = "test-ns"
+		svcName   = "test-svc"
+		negName   = "test-neg"
+	)
+	manager, _, testContext, err := NewTestSyncerManager(fake.NewSimpleClientset())
+	if err != nil {
+		t.Fatalf("NewTestSyncerManager() = %v, want nil", err)
+	}
+	// The informer has observed ResourceVersion 100.
+	store, getter := newSvcNegConsistencyStore("100")
+	manager.consistencyStore = store
+	// Stand in for the informer once it has caught up: make a created CR
+	// visible in the lister, so that ensureSvcNegCR does not wait for it.
+	testContext.SvcNegClient.(*negfake.Clientset).PrependReactor("create", "servicenetworkendpointgroups", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		cr := action.(k8stesting.CreateAction).GetObject().(*negv1beta1.ServiceNetworkEndpointGroup)
+		return false, nil, manager.svcNegLister.Add(cr)
+	})
+
+	svc := &v1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: svcName, UID: "svc-uid"}}
+	if err := testContext.ServiceInformer.GetIndexer().Add(svc); err != nil {
+		t.Fatalf("adding the service to the informer = %v, want nil", err)
+	}
+	svcKey := serviceKey{namespace: namespace, name: svcName}
+	portInfo := negtypes.PortInfo{PortTuple: negtypes.SvcPortTuple{Port: 80}, NegName: negName}
+	svcNegs := manager.svcNegClient.NetworkingV1beta1().ServiceNetworkEndpointGroups(namespace)
+
+	// A write at 200 that the informer has not observed. The lister has no
+	// such CR, so without the gate this would be taken for a missing CR.
+	store.WroteAt(negtypes.SvcNegRef(namespace, negName), "neg-uid", "200")
+	if err := manager.ensureSvcNegCR(svcKey, portInfo); !consistency.IsStall(err) {
+		t.Fatalf("ensureSvcNegCR() before the informer observed the write = %v, want a consistency stall", err)
+	}
+	if _, err := svcNegs.Get(context2.TODO(), negName, metav1.GetOptions{}); !apierrors.IsNotFound(err) {
+		t.Errorf("Get(%q) after a stalled ensureSvcNegCR() = %v, want NotFound: the CR must not be created from a stale read", negName, err)
+	}
+
+	getter.SetRV("200")
+	if err := manager.ensureSvcNegCR(svcKey, portInfo); err != nil {
+		t.Fatalf("ensureSvcNegCR() after the informer observed the write = %v, want nil", err)
+	}
+	if _, err := svcNegs.Get(context2.TODO(), negName, metav1.GetOptions{}); err != nil {
+		t.Errorf("Get(%q) after ensureSvcNegCR() = %v, want the CR to have been created", negName, err)
 	}
 }
