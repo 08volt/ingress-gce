@@ -17,10 +17,13 @@ limitations under the License.
 package controllers
 
 import (
+	stdctx "context"
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"sort"
 
+	"k8s.io/ingress-gce/pkg/l4/annotations"
 	"k8s.io/ingress-gce/pkg/l4/resources"
 
 	"github.com/GoogleCloudPlatform/k8s-cloud-provider/pkg/cloud/meta"
@@ -41,6 +44,55 @@ const (
 	// ReasonL4LBConfigAnnotationRemoved is used when the annotation for L4LBConfig is removed from the service.
 	ReasonL4LBConfigAnnotationRemoved = "L4LBConfigAnnotationRemoved"
 )
+
+type cnl4PodEndpoint struct {
+	Index    uint32 `json:"index"`
+	IndexHex string `json:"indexHex"`
+	PodIP    string `json:"podIP"`
+	Port     int32  `json:"port"`
+	NodeName string `json:"nodeName"`
+}
+
+func populateCNL4PodEndpointsAnnotation(ctx *context.ControllerContext, svc *v1.Service, newL4LBAnnotations map[string]string, svcLogger klog.Logger) {
+	if !annotations.HasLoadBalancerClass(svc, annotations.CNL4PocLoadBalancerClass) {
+		return
+	}
+	if newL4LBAnnotations == nil {
+		return
+	}
+	eps, err := ctx.KubeClient.CoreV1().Endpoints(svc.Namespace).Get(stdctx.Background(), svc.Name, metav1.GetOptions{})
+	if err != nil || eps == nil {
+		svcLogger.V(2).Info("Could not fetch Endpoints for CNL4 annotation", "err", err)
+		return
+	}
+	var list []cnl4PodEndpoint
+	for _, subset := range eps.Subsets {
+		var port int32
+		if len(subset.Ports) > 0 {
+			port = subset.Ports[0].Port
+		}
+		for _, addr := range subset.Addresses {
+			nodeName := ""
+			if addr.NodeName != nil {
+				nodeName = *addr.NodeName
+			}
+			list = append(list, cnl4PodEndpoint{
+				PodIP:    addr.IP,
+				Port:     port,
+				NodeName: nodeName,
+			})
+		}
+	}
+	sort.Slice(list, func(i, j int) bool { return list[i].PodIP < list[j].PodIP })
+	for i := range list {
+		idx := uint32(0x42 + i)
+		list[i].Index = idx
+		list[i].IndexHex = fmt.Sprintf("0x%02x", idx)
+	}
+	if b, err := json.Marshal(list); err == nil {
+		newL4LBAnnotations[annotations.CNL4PodEndpointsAnnotationKey] = string(b)
+	}
+}
 
 // computeNewAnnotationsIfNeeded checks if new annotations should be added to service.
 // If needed creates new service meta object.
@@ -76,6 +128,7 @@ func mergeAnnotations(existing, lbAnnotations map[string]string, keysToRemove []
 // updateL4ResourcesAnnotations checks if new annotations should be added to service and patch service metadata if needed.
 func updateL4ResourcesAnnotations(ctx *context.ControllerContext, svc *v1.Service, newL4LBAnnotations map[string]string, svcLogger klog.Logger) error {
 	svcLogger.V(3).Info("Updating annotations of service")
+	populateCNL4PodEndpointsAnnotation(ctx, svc, newL4LBAnnotations, svcLogger)
 	newObjectMeta := computeNewAnnotationsIfNeeded(svc, newL4LBAnnotations, resources.L4ResourceAnnotationKeys)
 	if newObjectMeta == nil {
 		svcLogger.V(3).Info("Service annotations not changed, skipping patch for service")
@@ -87,6 +140,7 @@ func updateL4ResourcesAnnotations(ctx *context.ControllerContext, svc *v1.Servic
 
 // updateL4DualStackResourcesAnnotations checks if new annotations should be added to dual-stack service and patch service metadata if needed.
 func updateL4DualStackResourcesAnnotations(ctx *context.ControllerContext, svc *v1.Service, newL4LBAnnotations map[string]string, svcLogger klog.Logger) error {
+	populateCNL4PodEndpointsAnnotation(ctx, svc, newL4LBAnnotations, svcLogger)
 	newObjectMeta := computeNewAnnotationsIfNeeded(svc, newL4LBAnnotations, resources.L4DualStackResourceAnnotationKeys)
 	if newObjectMeta == nil {
 		return nil

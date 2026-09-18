@@ -60,6 +60,13 @@ const (
 	// StandalonePassthroughNegLoadBalancerClass is the loadBalancerClass name used for services that
 	// should use GCE_VM_IP NEGs for L4.
 	StandalonePassthroughNegLoadBalancerClass = "networking.gke.io/standalone-passthrough-lb-neg"
+
+	// CNL4PocLoadBalancerClass is the loadBalancerClass name used for the CNL4 POC
+	// (supporting both ILB and NetLB depending on networking.gke.io/load-balancer-type).
+	CNL4PocLoadBalancerClass = "networking.gke.io/l4-cnl4-poc"
+
+	// CNL4PodEndpointsAnnotationKey stores serialized Pod endpoint identities (index -> podIP:port@node).
+	CNL4PodEndpointsAnnotationKey = "networking.gke.io/cnl4-pod-endpoints"
 )
 
 // GetLoadBalancerAnnotationType returns the type of GCP load balancer which should be assembled.

@@ -244,7 +244,8 @@ func (lc *L4NetLBController) needsDeletion(svc *v1.Service, svcLogger klog.Logge
 	// Check if service was provisioned by RBS controller before -- if it has rbs finalizer, rbs loadBalancerClass or rbs forwarding rule
 	if !utils.HasL4NetLBFinalizerV2(svc) && !utils.HasL4NetLBFinalizerV3(svc) &&
 		!lc.hasRBSForwardingRule(svc, svcLogger) &&
-		!annotations.HasLoadBalancerClass(svc, annotations.RegionalExternalLoadBalancerClass) {
+		!annotations.HasLoadBalancerClass(svc, annotations.RegionalExternalLoadBalancerClass) &&
+		!annotations.HasLoadBalancerClass(svc, annotations.CNL4PocLoadBalancerClass) {
 		return false
 	}
 	// handles service deletion
@@ -353,6 +354,10 @@ func (lc *L4NetLBController) shouldProcessService(newSvc, oldSvc *v1.Service, sv
 				lc.ctx.Recorder(newSvc.Namespace).Eventf(newSvc, v1.EventTypeWarning, "ConflictingConfiguration",
 					"loadBalancerClass conflicts with %s: %q annotation. External LoadBalancer Service provisioned.", annotations.ServiceAnnotationLoadBalancerType, string(annotations.LBTypeInternal))
 			}
+		} else if annotations.HasLoadBalancerClass(newSvc, annotations.CNL4PocLoadBalancerClass) {
+			if wantsNetLB, _ := annotations.WantsL4NetLB(newSvc); !wantsNetLB {
+				return false, false
+			}
 		} else {
 			svcLogger.Info("Ignoring service managed by another controller", "serviceLoadBalancerClass", *newSvc.Spec.LoadBalancerClass)
 			return false, false
@@ -400,6 +405,10 @@ func (lc *L4NetLBController) isRBSBasedService(svc *v1.Service, svcLogger klog.L
 	}
 	if svc.Spec.LoadBalancerClass != nil {
 		svcLogger.V(4).Info("Service has LoadBalancerClass annotation", "loadBalancerClass", *svc.Spec.LoadBalancerClass)
+		if annotations.HasLoadBalancerClass(svc, annotations.CNL4PocLoadBalancerClass) {
+			wantsNetLB, _ := annotations.WantsL4NetLB(svc)
+			return wantsNetLB
+		}
 		return annotations.HasLoadBalancerClass(svc, annotations.RegionalExternalLoadBalancerClass)
 	}
 	if utils.HasL4NetLBFinalizerV2(svc) || utils.HasL4NetLBFinalizerV3(svc) {

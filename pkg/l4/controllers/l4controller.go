@@ -290,6 +290,9 @@ func (l4c *L4Controller) shouldProcessService(service *v1.Service, svcLogger klo
 	if service.Spec.LoadBalancerClass != nil {
 		if annotations.HasLoadBalancerClass(service, annotations.RegionalInternalLoadBalancerClass) {
 			return true
+		} else if annotations.HasLoadBalancerClass(service, annotations.CNL4PocLoadBalancerClass) {
+			wantsILB, _ := annotations.WantsL4ILB(service)
+			return wantsILB
 		} else {
 			svcLogger.Info("Ignoring service managed by another controller", "serviceLoadBalancerClass", *service.Spec.LoadBalancerClass)
 			return false
@@ -600,7 +603,9 @@ func (l4c *L4Controller) needsUpdate(oldService *v1.Service, newService *v1.Serv
 	// Ignore services not handled by this controller.
 	// LoadBalancerClass can't be updated so we know if this controller should not process the ILB.
 	// We don't need to clean any resources if service is controlled by another controller.
-	if newService.Spec.LoadBalancerClass != nil && !annotations.HasLoadBalancerClass(newService, annotations.RegionalInternalLoadBalancerClass) {
+	if newService.Spec.LoadBalancerClass != nil &&
+		!annotations.HasLoadBalancerClass(newService, annotations.RegionalInternalLoadBalancerClass) &&
+		!annotations.HasLoadBalancerClass(newService, annotations.CNL4PocLoadBalancerClass) {
 		return false
 	}
 

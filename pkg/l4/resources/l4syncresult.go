@@ -34,6 +34,7 @@ var L4ResourceAnnotationKeys = []string{
 	annotations.FirewallRuleKey,
 	annotations.FirewallRuleDenyKey,
 	annotations.FirewallRuleForHealthcheckKey,
+	annotations.CNL4PodEndpointsAnnotationKey,
 }
 
 var l4IPv6ResourceAnnotationKeys = []string{

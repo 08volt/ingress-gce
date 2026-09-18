@@ -146,7 +146,7 @@ func WantsL4ILB(service *v1.Service) (bool, string) {
 	if service.Spec.Type != v1.ServiceTypeLoadBalancer {
 		return false, fmt.Sprintf("Type : %s", service.Spec.Type)
 	}
-	if service.Spec.LoadBalancerClass != nil {
+	if service.Spec.LoadBalancerClass != nil && !HasLoadBalancerClass(service, CNL4PocLoadBalancerClass) {
 		return HasLoadBalancerClass(service, RegionalInternalLoadBalancerClass), fmt.Sprintf("Type : %s", service.Spec.Type)
 	}
 	ltype := GetLoadBalancerAnnotationType(service)
@@ -164,7 +164,7 @@ func WantsL4NetLB(service *v1.Service) (bool, string) {
 	if service.Spec.Type != v1.ServiceTypeLoadBalancer {
 		return false, fmt.Sprintf("Type : %s", service.Spec.Type)
 	}
-	if service.Spec.LoadBalancerClass != nil {
+	if service.Spec.LoadBalancerClass != nil && !HasLoadBalancerClass(service, CNL4PocLoadBalancerClass) {
 		return HasLoadBalancerClass(service, RegionalExternalLoadBalancerClass), fmt.Sprintf("Type : %s", service.Spec.Type)
 	}
 	ltype := GetLoadBalancerAnnotationType(service)
@@ -231,7 +231,7 @@ func OnlyStatusAnnotationsChanged(oldService, newService *v1.Service) bool {
 func onlyStatusAnnotationsChanged(oldService, newService *v1.Service) bool {
 	for key, val := range newService.ObjectMeta.Annotations {
 		if oldVal, ok := oldService.ObjectMeta.Annotations[key]; !ok || oldVal != val {
-			if key == negannotation.NEGStatusKey || strings.HasPrefix(key, ServiceStatusPrefix) {
+			if key == negannotation.NEGStatusKey || key == CNL4PodEndpointsAnnotationKey || strings.HasPrefix(key, ServiceStatusPrefix) {
 				continue
 			}
 			return false

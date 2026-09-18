@@ -867,7 +867,8 @@ func (c *Controller) mergeVmIpNEGsPortInfo(service *apiv1.Service, name types.Na
 	if service.Spec.LoadBalancerClass != nil &&
 		!l4annotations.HasLoadBalancerClass(service, l4annotations.RegionalExternalLoadBalancerClass) &&
 		!l4annotations.HasLoadBalancerClass(service, l4annotations.RegionalInternalLoadBalancerClass) &&
-		!l4annotations.HasLoadBalancerClass(service, l4annotations.StandalonePassthroughNegLoadBalancerClass) {
+		!l4annotations.HasLoadBalancerClass(service, l4annotations.StandalonePassthroughNegLoadBalancerClass) &&
+		!l4annotations.HasLoadBalancerClass(service, l4annotations.CNL4PocLoadBalancerClass) {
 		msg := fmt.Sprintf("Ignoring Service %s, namespace %s as it uses a LoadBalancerClass %s", service.Name, service.Namespace, *service.Spec.LoadBalancerClass)
 		c.logger.Info(msg)
 		return nil
@@ -907,7 +908,8 @@ func (c *Controller) netLBServiceNeedsNEG(service *apiv1.Service, networkInfo *n
 	if !c.runL4ForNetLB {
 		return false
 	}
-	if l4annotations.HasLoadBalancerClass(service, l4annotations.RegionalExternalLoadBalancerClass) {
+	if l4annotations.HasLoadBalancerClass(service, l4annotations.RegionalExternalLoadBalancerClass) ||
+		l4annotations.HasLoadBalancerClass(service, l4annotations.CNL4PocLoadBalancerClass) {
 		return true
 	}
 	if utils.HasL4NetLBFinalizerV3(service) {
